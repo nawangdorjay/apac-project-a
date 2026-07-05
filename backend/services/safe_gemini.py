@@ -79,6 +79,9 @@ class _SlidingWindowRateLimiter:
             print(f"[safe_gemini] RPM limit ({self._rpm}/min) reached — waiting {wait_sec:.1f}s")
             time.sleep(wait_sec)
 
+_gemini_blocked_until = 0.0
+_gemini_block_lock = threading.Lock()
+
 _rate_limiter = _SlidingWindowRateLimiter(RPM_LIMIT)
 
 # ── Response cache (in-process, keyed by prompt hash) ────────────────────────
@@ -197,10 +200,15 @@ def safe_generate(
             print("[safe_gemini] Cache hit - skipping API call")
             return cached
 
-    if not GEMINI_API_KEY:
+    with _gemini_block_lock:
+        is_gemini_blocked = time.time() < _gemini_blocked_until
+
+    if not GEMINI_API_KEY or is_gemini_blocked:
+        if is_gemini_blocked:
+            print("[safe_gemini] Gemini API is currently blocked (Circuit Breaker active due to previous 429 quota errors). Direct failover routing triggered.")
         # 1. Try NVIDIA NIM fallback
         if NVIDIA_API_KEY:
-            print(f"[safe_gemini] No Gemini key. Pivoting to NVIDIA NIM Cloud API: '{NVIDIA_MODEL}'...")
+            print(f"[safe_gemini] Pivoting to NVIDIA NIM Cloud API: '{NVIDIA_MODEL}'...")
             response_text = _generate_via_nvidia_nim(prompt, json_mode)
             if response_text:
                 if use_cache:
@@ -210,14 +218,14 @@ def safe_generate(
         # 2. Try Ollama fallback
         ollama_model = _get_ollama_model()
         if ollama_model:
-            print(f"[safe_gemini] No Gemini key. Pivoting to local Ollama model: '{ollama_model}'...")
+            print(f"[safe_gemini] Pivoting to local Ollama model: '{ollama_model}'...")
             response_text = _generate_via_ollama(prompt, json_mode, ollama_model)
             if response_text:
                 if use_cache:
                     _set_cached(key, response_text)
                 return response_text
 
-        raise GeminiFallbackError("No GEMINI_API_KEY configured and no active cloud/local fallbacks (NVIDIA NIM/Ollama) available.")
+        raise GeminiFallbackError("No active Gemini API key or fallbacks (NVIDIA NIM/Ollama) available.")
 
     # Token budget guard
     if len(prompt) > TOKEN_BUDGET_CHARS:
@@ -269,6 +277,15 @@ def safe_generate(
 
             # Non-retriable or final attempt - Try NVIDIA NIM and Ollama fallbacks first before raising error
             print(f"[safe_gemini] [ERROR] Failed after {attempt} attempt(s): {e}")
+            
+            # Activate Circuit Breaker on 429 / Quota exhausted errors to avoid retrying on future calls
+            err_str = str(e).lower()
+            if any(code in err_str for code in ["429", "quota", "resource exhausted"]):
+                with _gemini_block_lock:
+                    global _gemini_blocked_until
+                    _gemini_blocked_until = time.time() + 300.0   # Block for 5 minutes
+                    print("[safe_gemini] Circuit Breaker activated! Gemini API calls will be blocked and automatically routed to fallbacks for the next 5 minutes.")
+
             if NVIDIA_API_KEY:
                 print(f"[safe_gemini] Gemini API error. Pivoting to NVIDIA NIM Cloud API: '{NVIDIA_MODEL}'...")
                 response_text = _generate_via_nvidia_nim(prompt, json_mode)

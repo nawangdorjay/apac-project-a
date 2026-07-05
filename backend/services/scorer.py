@@ -112,6 +112,24 @@ def compute_decision_score(
     }
 
 
+POSITIVE_COLUMNS = {
+    # Business
+    "revenue", "profit", "units_sold", "customer_satisfaction", "customers",
+    # Personal Finance
+    "income", "savings",
+    # Smart Communities
+    "public_transit_ridership", "waste_recycled_tons", "green_space_visitors"
+}
+
+NEGATIVE_COLUMNS = {
+    # Business
+    "expenses", "returns", "marketing_spend",
+    # Personal Finance
+    "housing", "food_groceries", "dining_out", "transport", "entertainment", "utilities", "healthcare", "subscriptions",
+    # Smart Communities
+    "air_quality_index", "traffic_delay_pct", "streetlight_outages", "citizen_service_requests", "water_consumption_m_liters"
+}
+
 def perturb_and_rescore(
     df: pd.DataFrame,
     profile: Dict[str, Any],
@@ -120,8 +138,9 @@ def perturb_and_rescore(
     original_opportunity_score: float = 50.0
 ) -> Dict[str, Any]:
     """
-    What-If: perturb a column by pct_change% and recompute the Decision Score
-    using the exact same deterministic formula. No new Gemini call for the score.
+    What-If: perturb a column by pct_change% and recompute the Decision Score.
+    Applies performance impact deltas (positive/negative impact based on column polarity)
+    so the simulator reacts dynamically and realistically.
     """
     df_perturbed = df.copy()
     if column in df_perturbed.columns:
@@ -131,7 +150,36 @@ def perturb_and_rescore(
     from services.profiler import profile_dataframe
     perturbed_profile = profile_dataframe(df_perturbed)
     
-    return compute_decision_score(df_perturbed, perturbed_profile, original_opportunity_score)
+    res = compute_decision_score(df_perturbed, perturbed_profile, original_opportunity_score)
+    
+    # Calculate performance impact delta based on column polarity
+    col_lower = column.lower().replace(" ", "_")
+    impact_delta = 0.0
+    if col_lower in POSITIVE_COLUMNS:
+        # Higher positive column = better score
+        impact_delta = (pct_change / 100.0) * 15.0
+    elif col_lower in NEGATIVE_COLUMNS:
+        # Higher negative column = worse score
+        impact_delta = -(pct_change / 100.0) * 15.0
+        
+    if impact_delta != 0.0:
+        res["score"] = round(max(0.0, min(100.0, res["score"] + impact_delta)), 1)
+        
+        # Adjust sub-scores dynamically to reflect the value change
+        if impact_delta > 0:
+            res["sub_scores"]["trend_stability"] = round(max(0.0, min(100.0, res["sub_scores"]["trend_stability"] + impact_delta)), 1)
+        else:
+            res["sub_scores"]["risk_inverse"] = round(max(0.0, min(100.0, res["sub_scores"]["risk_inverse"] + impact_delta)), 1)
+            
+        # Re-bucket Risk Level
+        if res["score"] >= 75:
+            res["risk_level"] = "Low"
+        elif res["score"] >= 50:
+            res["risk_level"] = "Medium"
+        else:
+            res["risk_level"] = "High"
+            
+    return res
 
 
 # --- Helpers ---
