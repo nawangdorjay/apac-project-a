@@ -1,0 +1,203 @@
+"""
+safe_gemini.py — Safe wrapper around the google-genai SDK.
+
+Protections against API bans:
+  1. RPM rate limiter    — stays under free-tier limit (default 10 RPM)
+  2. Exponential backoff — retries 429 / 503 with increasing delays
+  3. Response cache      — identical prompts reuse cached answers (saves quota)
+  4. Token budget guard  — logs a warning if a prompt is suspiciously large
+  5. Graceful fallback   — if all retries fail, raises GeminiFallbackError
+                           so the caller can return a pre-baked response
+
+Usage (in gemini_client.py):
+    from services.safe_gemini import safe_generate, GeminiFallbackError
+
+    try:
+        text = safe_generate(prompt, json_mode=True, max_tokens=800)
+    except GeminiFallbackError:
+        return FALLBACK_RESPONSE
+"""
+
+import os
+import time
+import hashlib
+import threading
+import json
+from collections import deque
+from typing import Optional
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# ── Config from .env ──────────────────────────────────────────────────────────
+
+GEMINI_API_KEY  = os.getenv("GEMINI_API_KEY", "").strip()
+MODEL_NAME      = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+RPM_LIMIT       = int(os.getenv("GEMINI_RPM_LIMIT", "10"))
+MAX_RETRIES     = int(os.getenv("GEMINI_MAX_RETRIES", "3"))
+
+# Warning threshold: log if prompt > this many chars (~50k tokens-ish)
+TOKEN_BUDGET_CHARS = 40_000
+
+# ── Sentinel exception ────────────────────────────────────────────────────────
+
+class GeminiFallbackError(Exception):
+    """Raised when all retries are exhausted — caller should use fallback."""
+    pass
+
+# ── Rate limiter (sliding-window, thread-safe) ────────────────────────────────
+
+class _SlidingWindowRateLimiter:
+    """
+    Tracks call timestamps in the last 60 s.
+    If we're at the limit, blocks until a slot opens.
+    """
+    def __init__(self, rpm: int):
+        self._rpm   = rpm
+        self._calls: deque = deque()
+        self._lock  = threading.Lock()
+
+    def acquire(self):
+        while True:
+            with self._lock:
+                now = time.monotonic()
+                # Drop timestamps older than 60 s
+                while self._calls and now - self._calls[0] >= 60:
+                    self._calls.popleft()
+
+                if len(self._calls) < self._rpm:
+                    self._calls.append(now)
+                    return  # slot available
+
+                # Need to wait — calculate how long
+                oldest   = self._calls[0]
+                wait_sec = 60 - (now - oldest) + 0.05   # small buffer
+
+            print(f"[safe_gemini] RPM limit ({self._rpm}/min) reached — waiting {wait_sec:.1f}s")
+            time.sleep(wait_sec)
+
+_rate_limiter = _SlidingWindowRateLimiter(RPM_LIMIT)
+
+# ── Response cache (in-process, keyed by prompt hash) ────────────────────────
+
+_cache: dict[str, str] = {}
+_cache_lock = threading.Lock()
+
+def _cache_key(prompt: str, json_mode: bool, max_tokens: int) -> str:
+    raw = f"{prompt}|{json_mode}|{max_tokens}|{MODEL_NAME}"
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+def _get_cached(key: str) -> Optional[str]:
+    with _cache_lock:
+        return _cache.get(key)
+
+def _set_cached(key: str, value: str):
+    with _cache_lock:
+        _cache[key] = value
+
+# ── Main safe wrapper ─────────────────────────────────────────────────────────
+
+def safe_generate(
+    prompt: str,
+    json_mode: bool = True,
+    max_tokens: int = 1000,
+    use_cache: bool = True,
+) -> str:
+    """
+    Calls Gemini safely.
+
+    Args:
+        prompt:     Full prompt string
+        json_mode:  If True, sets response_mime_type = application/json
+        max_tokens: Max output tokens
+        use_cache:  If True (default), identical prompts reuse cached responses
+
+    Returns:
+        Model response text
+
+    Raises:
+        GeminiFallbackError: if no API key or all retries exhausted
+    """
+    if not GEMINI_API_KEY:
+        raise GeminiFallbackError("No GEMINI_API_KEY configured")
+
+    # Token budget guard
+    if len(prompt) > TOKEN_BUDGET_CHARS:
+      print(f"[safe_gemini] [WARNING] Large prompt: {len(prompt):,} chars - consider trimming")
+
+    # Cache check
+    key = _cache_key(prompt, json_mode, max_tokens)
+    if use_cache:
+        cached = _get_cached(key)
+        if cached is not None:
+            print("[safe_gemini] Cache hit - skipping API call")
+            return cached
+
+    # Lazy-init client
+    from google import genai
+    from google.genai import types as genai_types
+    client = genai.Client(api_key=GEMINI_API_KEY)
+
+    config_kwargs = {
+        "max_output_tokens": max_tokens,
+        "temperature": 0.3,
+    }
+    if json_mode:
+        config_kwargs["response_mime_type"] = "application/json"
+
+    config = genai_types.GenerateContentConfig(**config_kwargs)
+
+    # Retry loop with exponential backoff
+    base_delay = 2.0   # seconds
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            _rate_limiter.acquire()   # block if at RPM limit
+
+            print(f"[safe_gemini] Calling {MODEL_NAME} (attempt {attempt}/{MAX_RETRIES})")
+            response = client.models.generate_content(
+                model=MODEL_NAME,
+                contents=prompt,
+                config=config,
+            )
+            text = response.text or ""
+            if use_cache:
+                _set_cached(key, text)
+            return text
+
+        except Exception as e:
+            err_str = str(e).lower()
+            is_retriable = any(code in err_str for code in [
+                "429", "rate", "quota", "503", "overloaded",
+                "resource exhausted", "unavailable"
+            ])
+
+            if is_retriable and attempt < MAX_RETRIES:
+                delay = base_delay * (2 ** (attempt - 1))   # 2s, 4s, 8s ...
+                print(f"[safe_gemini] Retriable error (attempt {attempt}): {e} - retrying in {delay:.0f}s")
+                time.sleep(delay)
+                continue
+
+            # Non-retriable or final attempt
+            print(f"[safe_gemini] [ERROR] Failed after {attempt} attempt(s): {e}")
+            raise GeminiFallbackError(str(e)) from e
+
+    raise GeminiFallbackError("Exhausted all retries")
+
+
+def get_status() -> dict:
+    """Return current rate-limiter and cache stats (for health endpoint)."""
+    with _rate_limiter._lock:
+        now = time.monotonic()
+        recent = [t for t in _rate_limiter._calls if now - t < 60]
+        calls_last_min = len(recent)
+
+    with _cache_lock:
+        cache_size = len(_cache)
+
+    return {
+        "model": MODEL_NAME,
+        "rpm_limit": RPM_LIMIT,
+        "calls_last_minute": calls_last_min,
+        "cache_entries": cache_size,
+        "api_key_configured": bool(GEMINI_API_KEY),
+    }

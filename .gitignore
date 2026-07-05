@@ -1,0 +1,33 @@
+# Logs
+*.log
+logs/
+
+# Python
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+backend/venv/
+backend/.venv/
+backend/uploads/
+backend/sessions/
+
+# Frontend Node / Build
+frontend/node_modules/
+frontend/dist/
+frontend/.vercel/
+frontend/.env.local
+frontend/.env.production
+
+# Environment Secrets
+.env
+*.env
+backend/.env
+frontend/.env
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

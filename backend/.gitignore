@@ -1,0 +1,24 @@
+# Environment — NEVER commit this
+.env
+*.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Sessions / uploads (in-memory for now, but future-proofing)
+uploads/
+sessions/
+
+# IDE
+.vscode/
+.idea/
+*.swp
