@@ -367,7 +367,7 @@ export default function Landing() {
       {/* Footer */}
       <footer style={{ padding: '32px 40px', background: 'white', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
         <span style={{ fontSize: 13, color: '#64748B' }}>
-          DecisionLens AI · From Data to Decisions in Seconds
+          DecisionLens AI · Made with ❤️ by Nawang Dorjay
         </span>
         <div style={{ display: 'flex', gap: 12 }}>
           <span style={{ fontSize: 11, fontWeight: 600, color: '#64748B', background: '#F1F5F9', padding: '4px 10px', borderRadius: 12 }}>
