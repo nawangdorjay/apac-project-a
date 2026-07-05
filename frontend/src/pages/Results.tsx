@@ -55,21 +55,40 @@ function ScoreGauge({ score, riskLevel }: { score: number; riskLevel: string }) 
 
 function AutoChart({ col, data }: { col: ColumnProfile; data: Record<string, unknown>[] }) {
   const isNumeric = col.dtype.includes('int') || col.dtype.includes('float')
+  if (!isNumeric || data.length === 0) return null
+
+  // Find the best X-axis key dynamically
+  let xKey = Object.keys(data[0] || {})[0] || ''
+  const timeKeys = ['month', 'date', 'year', 'quarter', 'time', 'timestamp', 'period', 'week', 'day']
+  const foundTimeKey = Object.keys(data[0] || {}).find(k => 
+    timeKeys.some(tk => k.toLowerCase().includes(tk))
+  )
+  if (foundTimeKey) {
+    xKey = foundTimeKey
+  } else {
+    // Look for the first column that has multiple unique values (is not constant)
+    const keys = Object.keys(data[0] || {})
+    for (const key of keys) {
+      if (key === col.name) continue
+      const uniqueValues = new Set(data.map(row => String(row[key] ?? '')))
+      if (uniqueValues.size > 1) {
+        xKey = key
+        break
+      }
+    }
+  }
   
-  // Aggregate values by the first column's name to avoid duplicate categories (e.g., multiple "Bengaluru" entries)
+  // Aggregate values by selected X-axis key
   const grouped: Record<string, { sum: number; count: number }> = {}
   data.forEach(row => {
-    const firstKey = Object.keys(row)[0]
-    if (firstKey) {
-      const name = String(row[firstKey] ?? '')
-      const val = Number(row[col.name])
-      if (!isNaN(val)) {
-        if (!grouped[name]) {
-          grouped[name] = { sum: 0, count: 0 }
-        }
-        grouped[name].sum += val
-        grouped[name].count += 1
+    const name = String(row[xKey] ?? '')
+    const val = Number(row[col.name])
+    if (!isNaN(val)) {
+      if (!grouped[name]) {
+        grouped[name] = { sum: 0, count: 0 }
       }
+      grouped[name].sum += val
+      grouped[name].count += 1
     }
   })
 
@@ -78,7 +97,7 @@ function AutoChart({ col, data }: { col: ColumnProfile; data: Record<string, unk
     value: Number((grouped[name].sum / grouped[name].count).toFixed(2))
   }))
 
-  if (!isNumeric || values.length === 0) return null
+  if (values.length === 0) return null
 
   const COLORS = ['#2563EB', '#7C3AED', '#16A34A', '#D97706', '#DC2626', '#0891B2']
 
