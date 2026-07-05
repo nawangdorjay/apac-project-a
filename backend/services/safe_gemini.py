@@ -192,6 +192,7 @@ def safe_generate(
     """
     Calls Gemini safely. Falls back to local Ollama if running, then to NVIDIA NIM, then to pre-baked static data.
     """
+    global _gemini_blocked_until
     # Cache check
     key = _cache_key(prompt, json_mode, max_tokens)
     if use_cache:
@@ -301,7 +302,6 @@ def safe_generate(
             err_str = str(e).lower()
             if any(code in err_str for code in ["429", "quota", "resource exhausted"]):
                 with _gemini_block_lock:
-                    global _gemini_blocked_until
                     _gemini_blocked_until = time.time() + 300.0   # Block for 5 minutes
                     print("[safe_gemini] Circuit Breaker activated! Gemini API calls will be blocked and automatically routed to fallbacks for the next 5 minutes.")
 
