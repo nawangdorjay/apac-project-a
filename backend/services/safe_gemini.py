@@ -268,10 +268,29 @@ def safe_generate(
                 "429", "rate", "quota", "503", "overloaded",
                 "resource exhausted", "unavailable"
             ])
+            
+            # Check if this is a permanent quota limit (limit: 0 or perday)
+            is_permanent_quota_exhaust = "limit: 0" in err_str or "perday" in err_str
+
+            if is_permanent_quota_exhaust:
+                print(f"[safe_gemini] Quota permanently exhausted (limit: 0 / perday). Skipping remaining retries and pivoting immediately!")
+                is_retriable = False
 
             if is_retriable and attempt < MAX_RETRIES:
+                # Default exponential backoff
                 delay = base_delay * (2 ** (attempt - 1))   # 2s, 4s, 8s ...
-                print(f"[safe_gemini] Retriable error (attempt {attempt}): {e} - retrying in {delay:.0f}s")
+                
+                # Parse retryDelay from Gemini error if available
+                import re
+                match = re.search(r"(?:retry in|retrydelay:?\s*'?)\s*(\d+(\.\d+)?)s?", err_str)
+                if match:
+                    try:
+                        delay = float(match.group(1))
+                        print(f"[safe_gemini] Parsed dynamic retry delay from API: {delay:.1f}s")
+                    except ValueError:
+                        pass
+                
+                print(f"[safe_gemini] Retriable error (attempt {attempt}): {e} - retrying in {delay:.1f}s")
                 time.sleep(delay)
                 continue
 

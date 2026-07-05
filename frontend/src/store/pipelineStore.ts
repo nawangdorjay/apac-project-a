@@ -10,7 +10,7 @@ export type PipelineStep =
   | 'done'
 
 export type RiskLevel = 'Low' | 'Medium' | 'High'
-export type DatasetContext = 'business' | 'personal_finance' | 'student'
+export type DatasetContext = 'business' | 'personal_finance' | 'student' | 'civic'
 
 export interface ColumnProfile {
   name: string

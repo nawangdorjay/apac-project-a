@@ -5,6 +5,7 @@ import { usePipelineStore, DatasetContext } from '../store/pipelineStore'
 import { uploadFile, uploadDemoDataset, getProfile, getSummary, getDecisionScore } from '../lib/api'
 
 const CONTEXT_OPTIONS: { value: DatasetContext; label: string; icon: string }[] = [
+  { value: 'civic', label: 'Smarter Communities', icon: '🏙️' },
   { value: 'business', label: 'Business', icon: '📈' },
   { value: 'personal_finance', label: 'Personal Finance', icon: '💰' },
   { value: 'student', label: 'Student / Academic', icon: '📚' },

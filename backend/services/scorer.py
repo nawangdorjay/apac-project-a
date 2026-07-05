@@ -118,7 +118,11 @@ POSITIVE_COLUMNS = {
     # Personal Finance
     "income", "savings",
     # Smart Communities
-    "public_transit_ridership", "waste_recycled_tons", "green_space_visitors"
+    "public_transit_ridership", "waste_recycled_tons", "green_space_visitors",
+    # Healthcare Wellness
+    "population", "clinics_within_5km", "preventive_visit_pct", "telehealth_pct", "insurance_coverage_pct",
+    # Student
+    "attendance_pct", "study_hours", "sleep_hours", "final_score", "gpa"
 }
 
 NEGATIVE_COLUMNS = {
@@ -127,7 +131,11 @@ NEGATIVE_COLUMNS = {
     # Personal Finance
     "housing", "food_groceries", "dining_out", "transport", "entertainment", "utilities", "healthcare", "subscriptions",
     # Smart Communities
-    "air_quality_index", "traffic_delay_pct", "streetlight_outages", "citizen_service_requests", "water_consumption_m_liters"
+    "air_quality_index", "traffic_delay_pct", "streetlight_outages", "citizen_service_requests", "water_consumption_m_liters",
+    # Healthcare Wellness
+    "avg_wait_minutes", "emergency_visits", "chronic_disease_pct", "senior_pop_pct",
+    # Student
+    "screentime_hours", "absences"
 }
 
 def perturb_and_rescore(
@@ -139,8 +147,8 @@ def perturb_and_rescore(
 ) -> Dict[str, Any]:
     """
     What-If: perturb a column by pct_change% and recompute the Decision Score.
-    Applies performance impact deltas (positive/negative impact based on column polarity)
-    so the simulator reacts dynamically and realistically.
+    Applies performance impact deltas directly to the Opportunity sub-score (1.3x weight)
+    so the simulator reacts dynamically and matches the design specification.
     """
     df_perturbed = df.copy()
     if column in df_perturbed.columns:
@@ -150,35 +158,17 @@ def perturb_and_rescore(
     from services.profiler import profile_dataframe
     perturbed_profile = profile_dataframe(df_perturbed)
     
-    res = compute_decision_score(df_perturbed, perturbed_profile, original_opportunity_score)
-    
-    # Calculate performance impact delta based on column polarity
+    # Calculate perturbed opportunity score based on column polarity
     col_lower = column.lower().replace(" ", "_")
-    impact_delta = 0.0
+    opportunity_delta = 0.0
     if col_lower in POSITIVE_COLUMNS:
-        # Higher positive column = better score
-        impact_delta = (pct_change / 100.0) * 15.0
+        opportunity_delta = pct_change * 1.3
     elif col_lower in NEGATIVE_COLUMNS:
-        # Higher negative column = worse score
-        impact_delta = -(pct_change / 100.0) * 15.0
+        opportunity_delta = -pct_change * 1.3
         
-    if impact_delta != 0.0:
-        res["score"] = round(max(0.0, min(100.0, res["score"] + impact_delta)), 1)
-        
-        # Adjust sub-scores dynamically to reflect the value change
-        if impact_delta > 0:
-            res["sub_scores"]["trend_stability"] = round(max(0.0, min(100.0, res["sub_scores"]["trend_stability"] + impact_delta)), 1)
-        else:
-            res["sub_scores"]["risk_inverse"] = round(max(0.0, min(100.0, res["sub_scores"]["risk_inverse"] + impact_delta)), 1)
-            
-        # Re-bucket Risk Level
-        if res["score"] >= 75:
-            res["risk_level"] = "Low"
-        elif res["score"] >= 50:
-            res["risk_level"] = "Medium"
-        else:
-            res["risk_level"] = "High"
-            
+    new_opportunity = max(0.0, min(100.0, original_opportunity_score + opportunity_delta))
+    
+    res = compute_decision_score(df_perturbed, perturbed_profile, new_opportunity)
     return res
 
 

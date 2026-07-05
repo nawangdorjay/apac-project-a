@@ -76,6 +76,7 @@ def generate_summary(profile: Dict[str, Any], dataset_context: str) -> Dict[str,
         "business":       "business performance data (sales, revenue, expenses)",
         "personal_finance": "personal household budget and spending data",
         "student":        "student academic performance data (grades, attendance, study hours)",
+        "civic":          "civic and smart community data (sustainability, healthcare, mobility)",
     }
     context_desc = context_labels.get(dataset_context, "general data")
 
@@ -123,6 +124,7 @@ def generate_opportunity_score(profile: Dict[str, Any], dataset_context: str) ->
         "business":       "business",
         "personal_finance": "personal finance",
         "student":        "academic",
+        "civic":          "civic and smart community",
     }
     ctx = context_labels.get(dataset_context, "general")
 
@@ -163,6 +165,7 @@ def generate_recommendations(
         "business":       "business performance",
         "personal_finance": "personal financial health",
         "student":        "academic performance",
+        "civic":          "civic and smart community health",
     }
     ctx = context_labels.get(dataset_context, "data")
 
