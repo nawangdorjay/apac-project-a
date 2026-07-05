@@ -36,6 +36,8 @@ MODEL_NAME      = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
 RPM_LIMIT       = int(os.getenv("GEMINI_RPM_LIMIT", "10"))
 MAX_RETRIES     = int(os.getenv("GEMINI_MAX_RETRIES", "3"))
 OLLAMA_HOST     = os.getenv("OLLAMA_HOST", "http://localhost:11434").strip("/")
+NVIDIA_API_KEY  = os.getenv("NVIDIA_API_KEY", "").strip()
+NVIDIA_MODEL    = os.getenv("NVIDIA_MODEL", "meta/llama-3.1-8b-instruct")
 
 # Warning threshold: log if prompt > this many chars (~50k tokens-ish)
 TOKEN_BUDGET_CHARS = 40_000
@@ -137,6 +139,45 @@ def _generate_via_ollama(prompt: str, json_mode: bool, model_name: str) -> Optio
         print(f"[safe_gemini] Ollama invocation failed: {e}")
         return None
 
+def _generate_via_nvidia_nim(prompt: str, json_mode: bool) -> Optional[str]:
+    """Query NVIDIA NIM API as a cloud fallback."""
+    import urllib.request
+    import json
+    if not NVIDIA_API_KEY:
+        return None
+    try:
+        url = "https://integrate.api.nvidia.com/v1/chat/completions"
+        system_content = "You are a helpful analyst. Respond in valid JSON." if json_mode else "You are a helpful analyst."
+        payload = {
+            "model": NVIDIA_MODEL,
+            "messages": [
+                {"role": "system", "content": system_content},
+                {"role": "user", "content": prompt}
+            ],
+            "temperature": 0.2,
+            "max_tokens": 1000
+        }
+        if json_mode:
+            payload["response_format"] = {"type": "json_object"}
+            
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {NVIDIA_API_KEY}"
+            },
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=30.0) as response:
+            res_data = json.loads(response.read().decode())
+            choices = res_data.get("choices", [])
+            if choices:
+                return choices[0].get("message", {}).get("content", "")
+    except Exception as e:
+        print(f"[safe_gemini] NVIDIA NIM invocation failed: {e}")
+        return None
+
 # ── Main safe wrapper ─────────────────────────────────────────────────────────
 
 def safe_generate(
@@ -146,7 +187,7 @@ def safe_generate(
     use_cache: bool = True,
 ) -> str:
     """
-    Calls Gemini safely. Falls back to local Ollama if running, then to pre-baked static data.
+    Calls Gemini safely. Falls back to local Ollama if running, then to NVIDIA NIM, then to pre-baked static data.
     """
     # Cache check
     key = _cache_key(prompt, json_mode, max_tokens)
@@ -157,6 +198,7 @@ def safe_generate(
             return cached
 
     if not GEMINI_API_KEY:
+        # 1. Try Ollama fallback
         ollama_model = _get_ollama_model()
         if ollama_model:
             print(f"[safe_gemini] No API key. Pivoting to local Ollama model: '{ollama_model}'...")
@@ -165,7 +207,17 @@ def safe_generate(
                 if use_cache:
                     _set_cached(key, response_text)
                 return response_text
-        raise GeminiFallbackError("No GEMINI_API_KEY configured and Ollama not running.")
+
+        # 2. Try NVIDIA NIM fallback
+        if NVIDIA_API_KEY:
+            print(f"[safe_gemini] No API key. Pivoting to NVIDIA NIM Cloud API: '{NVIDIA_MODEL}'...")
+            response_text = _generate_via_nvidia_nim(prompt, json_mode)
+            if response_text:
+                if use_cache:
+                    _set_cached(key, response_text)
+                return response_text
+
+        raise GeminiFallbackError("No GEMINI_API_KEY configured and no active local/cloud fallbacks (Ollama/NVIDIA NIM) available.")
 
     # Token budget guard
     if len(prompt) > TOKEN_BUDGET_CHARS:
@@ -215,7 +267,7 @@ def safe_generate(
                 time.sleep(delay)
                 continue
 
-            # Non-retriable or final attempt - Try Ollama fallback first before raising error
+            # Non-retriable or final attempt - Try Ollama and NVIDIA NIM fallbacks first before raising error
             print(f"[safe_gemini] [ERROR] Failed after {attempt} attempt(s): {e}")
             ollama_model = _get_ollama_model()
             if ollama_model:
@@ -225,6 +277,15 @@ def safe_generate(
                     if use_cache:
                         _set_cached(key, response_text)
                     return response_text
+            
+            if NVIDIA_API_KEY:
+                print(f"[safe_gemini] Gemini API error. Pivoting to NVIDIA NIM Cloud API: '{NVIDIA_MODEL}'...")
+                response_text = _generate_via_nvidia_nim(prompt, json_mode)
+                if response_text:
+                    if use_cache:
+                        _set_cached(key, response_text)
+                    return response_text
+                    
             raise GeminiFallbackError(str(e)) from e
 
     raise GeminiFallbackError("Exhausted all retries")
