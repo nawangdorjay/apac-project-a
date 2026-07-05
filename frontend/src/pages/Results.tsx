@@ -55,8 +55,28 @@ function ScoreGauge({ score, riskLevel }: { score: number; riskLevel: string }) 
 
 function AutoChart({ col, data }: { col: ColumnProfile; data: Record<string, unknown>[] }) {
   const isNumeric = col.dtype.includes('int') || col.dtype.includes('float')
-  const values = data.map(row => ({ name: String(row[Object.keys(row)[0]] ?? ''), value: Number(row[col.name]) }))
-    .filter(v => !isNaN(v.value))
+  
+  // Aggregate values by the first column's name to avoid duplicate categories (e.g., multiple "Bengaluru" entries)
+  const grouped: Record<string, { sum: number; count: number }> = {}
+  data.forEach(row => {
+    const firstKey = Object.keys(row)[0]
+    if (firstKey) {
+      const name = String(row[firstKey] ?? '')
+      const val = Number(row[col.name])
+      if (!isNaN(val)) {
+        if (!grouped[name]) {
+          grouped[name] = { sum: 0, count: 0 }
+        }
+        grouped[name].sum += val
+        grouped[name].count += 1
+      }
+    }
+  })
+
+  const values = Object.keys(grouped).map(name => ({
+    name,
+    value: Number((grouped[name].sum / grouped[name].count).toFixed(2))
+  }))
 
   if (!isNumeric || values.length === 0) return null
 
