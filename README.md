@@ -8,6 +8,9 @@
 [![NVIDIA NIM](https://img.shields.io/badge/NVIDIA-NIM%20Active-76B900?style=for-the-badge&logo=nvidia)](https://build.nvidia.com)
 [![Google Gemini](https://img.shields.io/badge/Google-Gemini%20Active-8E75C2?style=for-the-badge&logo=google-gemini)](https://aistudio.google.com)
 
+> ⚠️ **Note for Hackathon Reviewers:**  
+> The backend of this platform is deployed on **Render's Free Tier**. If the page is stuck loading or shows a timeout on your first click, the backend is simply spinning up from a sleep state. Please **wait 45-60 seconds and refresh the page** to activate it! Subsequent loads will be instantaneous.
+
 ---
 
 ## 🔗 Live Deployments
