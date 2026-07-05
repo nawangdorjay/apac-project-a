@@ -35,6 +35,7 @@ GEMINI_API_KEY  = os.getenv("GEMINI_API_KEY", "").strip()
 MODEL_NAME      = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
 RPM_LIMIT       = int(os.getenv("GEMINI_RPM_LIMIT", "10"))
 MAX_RETRIES     = int(os.getenv("GEMINI_MAX_RETRIES", "3"))
+OLLAMA_HOST     = os.getenv("OLLAMA_HOST", "http://localhost:11434").strip("/")
 
 # Warning threshold: log if prompt > this many chars (~50k tokens-ish)
 TOKEN_BUDGET_CHARS = 40_000
@@ -100,7 +101,7 @@ def _get_ollama_model() -> Optional[str]:
     import urllib.request
     import json
     try:
-        req = urllib.request.urlopen("http://localhost:11434/api/tags", timeout=1.0)
+        req = urllib.request.urlopen(f"{OLLAMA_HOST}/api/tags", timeout=1.0)
         data = json.loads(req.read().decode())
         models = data.get("models", [])
         if models:
@@ -114,7 +115,7 @@ def _generate_via_ollama(prompt: str, json_mode: bool, model_name: str) -> Optio
     import urllib.request
     import json
     try:
-        url = "http://localhost:11434/api/generate"
+        url = f"{OLLAMA_HOST}/api/generate"
         payload = {
             "model": model_name,
             "prompt": prompt,
