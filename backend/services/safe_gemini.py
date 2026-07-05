@@ -95,6 +95,47 @@ def _set_cached(key: str, value: str):
     with _cache_lock:
         _cache[key] = value
 
+def _get_ollama_model() -> Optional[str]:
+    """Retrieve first available local model name from Ollama API if active."""
+    import urllib.request
+    import json
+    try:
+        req = urllib.request.urlopen("http://localhost:11434/api/tags", timeout=1.0)
+        data = json.loads(req.read().decode())
+        models = data.get("models", [])
+        if models:
+            return models[0]["name"]
+    except Exception:
+        pass
+    return None
+
+def _generate_via_ollama(prompt: str, json_mode: bool, model_name: str) -> Optional[str]:
+    """Post prompt to local Ollama server generation endpoint."""
+    import urllib.request
+    import json
+    try:
+        url = "http://localhost:11434/api/generate"
+        payload = {
+            "model": model_name,
+            "prompt": prompt,
+            "stream": False
+        }
+        if json_mode:
+            payload["format"] = "json"
+            
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=30.0) as response:
+            res_data = json.loads(response.read().decode())
+            return res_data.get("response", "")
+    except Exception as e:
+        print(f"[safe_gemini] Ollama invocation failed: {e}")
+        return None
+
 # ── Main safe wrapper ─────────────────────────────────────────────────────────
 
 def safe_generate(
@@ -104,27 +145,8 @@ def safe_generate(
     use_cache: bool = True,
 ) -> str:
     """
-    Calls Gemini safely.
-
-    Args:
-        prompt:     Full prompt string
-        json_mode:  If True, sets response_mime_type = application/json
-        max_tokens: Max output tokens
-        use_cache:  If True (default), identical prompts reuse cached responses
-
-    Returns:
-        Model response text
-
-    Raises:
-        GeminiFallbackError: if no API key or all retries exhausted
+    Calls Gemini safely. Falls back to local Ollama if running, then to pre-baked static data.
     """
-    if not GEMINI_API_KEY:
-        raise GeminiFallbackError("No GEMINI_API_KEY configured")
-
-    # Token budget guard
-    if len(prompt) > TOKEN_BUDGET_CHARS:
-      print(f"[safe_gemini] [WARNING] Large prompt: {len(prompt):,} chars - consider trimming")
-
     # Cache check
     key = _cache_key(prompt, json_mode, max_tokens)
     if use_cache:
@@ -132,6 +154,21 @@ def safe_generate(
         if cached is not None:
             print("[safe_gemini] Cache hit - skipping API call")
             return cached
+
+    if not GEMINI_API_KEY:
+        ollama_model = _get_ollama_model()
+        if ollama_model:
+            print(f"[safe_gemini] No API key. Pivoting to local Ollama model: '{ollama_model}'...")
+            response_text = _generate_via_ollama(prompt, json_mode, ollama_model)
+            if response_text:
+                if use_cache:
+                    _set_cached(key, response_text)
+                return response_text
+        raise GeminiFallbackError("No GEMINI_API_KEY configured and Ollama not running.")
+
+    # Token budget guard
+    if len(prompt) > TOKEN_BUDGET_CHARS:
+      print(f"[safe_gemini] [WARNING] Large prompt: {len(prompt):,} chars - consider trimming")
 
     # Lazy-init client
     from google import genai
@@ -177,8 +214,16 @@ def safe_generate(
                 time.sleep(delay)
                 continue
 
-            # Non-retriable or final attempt
+            # Non-retriable or final attempt - Try Ollama fallback first before raising error
             print(f"[safe_gemini] [ERROR] Failed after {attempt} attempt(s): {e}")
+            ollama_model = _get_ollama_model()
+            if ollama_model:
+                print(f"[safe_gemini] Gemini API error. Pivoting to local Ollama model: '{ollama_model}'...")
+                response_text = _generate_via_ollama(prompt, json_mode, ollama_model)
+                if response_text:
+                    if use_cache:
+                        _set_cached(key, response_text)
+                    return response_text
             raise GeminiFallbackError(str(e)) from e
 
     raise GeminiFallbackError("Exhausted all retries")
