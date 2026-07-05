@@ -198,26 +198,26 @@ def safe_generate(
             return cached
 
     if not GEMINI_API_KEY:
-        # 1. Try Ollama fallback
-        ollama_model = _get_ollama_model()
-        if ollama_model:
-            print(f"[safe_gemini] No API key. Pivoting to local Ollama model: '{ollama_model}'...")
-            response_text = _generate_via_ollama(prompt, json_mode, ollama_model)
-            if response_text:
-                if use_cache:
-                    _set_cached(key, response_text)
-                return response_text
-
-        # 2. Try NVIDIA NIM fallback
+        # 1. Try NVIDIA NIM fallback
         if NVIDIA_API_KEY:
-            print(f"[safe_gemini] No API key. Pivoting to NVIDIA NIM Cloud API: '{NVIDIA_MODEL}'...")
+            print(f"[safe_gemini] No Gemini key. Pivoting to NVIDIA NIM Cloud API: '{NVIDIA_MODEL}'...")
             response_text = _generate_via_nvidia_nim(prompt, json_mode)
             if response_text:
                 if use_cache:
                     _set_cached(key, response_text)
                 return response_text
 
-        raise GeminiFallbackError("No GEMINI_API_KEY configured and no active local/cloud fallbacks (Ollama/NVIDIA NIM) available.")
+        # 2. Try Ollama fallback
+        ollama_model = _get_ollama_model()
+        if ollama_model:
+            print(f"[safe_gemini] No Gemini key. Pivoting to local Ollama model: '{ollama_model}'...")
+            response_text = _generate_via_ollama(prompt, json_mode, ollama_model)
+            if response_text:
+                if use_cache:
+                    _set_cached(key, response_text)
+                return response_text
+
+        raise GeminiFallbackError("No GEMINI_API_KEY configured and no active cloud/local fallbacks (NVIDIA NIM/Ollama) available.")
 
     # Token budget guard
     if len(prompt) > TOKEN_BUDGET_CHARS:
@@ -267,20 +267,20 @@ def safe_generate(
                 time.sleep(delay)
                 continue
 
-            # Non-retriable or final attempt - Try Ollama and NVIDIA NIM fallbacks first before raising error
+            # Non-retriable or final attempt - Try NVIDIA NIM and Ollama fallbacks first before raising error
             print(f"[safe_gemini] [ERROR] Failed after {attempt} attempt(s): {e}")
-            ollama_model = _get_ollama_model()
-            if ollama_model:
-                print(f"[safe_gemini] Gemini API error. Pivoting to local Ollama model: '{ollama_model}'...")
-                response_text = _generate_via_ollama(prompt, json_mode, ollama_model)
+            if NVIDIA_API_KEY:
+                print(f"[safe_gemini] Gemini API error. Pivoting to NVIDIA NIM Cloud API: '{NVIDIA_MODEL}'...")
+                response_text = _generate_via_nvidia_nim(prompt, json_mode)
                 if response_text:
                     if use_cache:
                         _set_cached(key, response_text)
                     return response_text
             
-            if NVIDIA_API_KEY:
-                print(f"[safe_gemini] Gemini API error. Pivoting to NVIDIA NIM Cloud API: '{NVIDIA_MODEL}'...")
-                response_text = _generate_via_nvidia_nim(prompt, json_mode)
+            ollama_model = _get_ollama_model()
+            if ollama_model:
+                print(f"[safe_gemini] Gemini API error. Pivoting to local Ollama model: '{ollama_model}'...")
+                response_text = _generate_via_ollama(prompt, json_mode, ollama_model)
                 if response_text:
                     if use_cache:
                         _set_cached(key, response_text)
