@@ -466,13 +466,13 @@ export default function Results() {
           </div>
         )}
 
-        {/* Outcome Prediction (Forecasting) */}
+        {/* Trend Projection (linear extrapolation) */}
         {numericCols.length > 0 && (
           <div className="card animate-fade-in-up" style={{ marginBottom: 20 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 10 }}>
               <div>
-                <div style={{ fontSize: 13, fontWeight: 600, color: '#64748B' }}>🔮 OUTCOME PREDICTION & FORECASTING</div>
-                <div style={{ fontSize: 12, color: '#94A3B8', marginTop: 2 }}>GPU-accelerated linear trend projections (next 3 periods)</div>
+                <div style={{ fontSize: 13, fontWeight: 600, color: '#64748B' }}>📈 TREND PROJECTION (LINEAR EXTRAPOLATION)</div>
+                <div style={{ fontSize: 12, color: '#94A3B8', marginTop: 2 }}>Simple least-squares fit on the column's history, projected forward 3 periods with 95% CI bands.</div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{ fontSize: 12, color: '#475569', fontWeight: 500 }}>Select Variable:</span>
@@ -491,12 +491,15 @@ export default function Results() {
                 </select>
               </div>
             </div>
+            <div style={{ display: 'flex', gap: 8, padding: '8px 12px', background: '#FEF3C7', borderRadius: 6, fontSize: 11, color: '#92400E', border: '1px solid #FDE68A', marginBottom: 12 }}>
+              ⚠ This is a naive linear extrapolation, not an ML forecast. It assumes the historical trend continues unchanged — useful for sanity-checking momentum, not for predicting shocks or seasonality.
+            </div>
 
             {forecastLoading ? (
               <div style={{ height: 220, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <div className="status-chip">
                   <div className="dot"></div>
-                  Generating projections...
+                  Fitting linear trend...
                 </div>
               </div>
             ) : (

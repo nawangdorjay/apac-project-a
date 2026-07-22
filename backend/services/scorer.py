@@ -286,11 +286,16 @@ def _compute_type_conformity(df: pd.DataFrame, columns: list) -> float:
 
 def forecast_series(df: pd.DataFrame, column: str, periods: int = 3) -> Dict[str, Any]:
     """
-    Generate a simple outcome projection (linear trend) for a numeric column.
-    Returns:
-      - historical: list of values
-      - projected: list of predicted values (including standard error bounds)
-      - message: string detailing the trend direction
+    Generate a simple linear trend projection (least-squares fit) for a
+    numeric column. Returns:
+      - historical: list of {index, value} points
+      - projected:  list of {index, value, lower, upper} points where
+                    lower/upper form a 95% CI band based on residual std
+      - message:    string detailing the trend direction
+
+    NOTE: This is a naive extrapolation — not an ML forecast. It assumes
+    the historical linear trend continues unchanged. Useful for sanity-
+    checking momentum, not for predicting shocks or seasonality.
     """
     if column not in df.columns or not pd.api.types.is_numeric_dtype(df[column]):
         return {"historical": [], "projected": [], "message": "Non-numeric column"}

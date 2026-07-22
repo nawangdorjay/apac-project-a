@@ -368,16 +368,21 @@ def chat_with_dataset(session_id: str, request: ChatRequest):
 @app.get("/api/forecast/{session_id}", response_model=ForecastResponse)
 def get_forecast(session_id: str, column: str, periods: int = 3):
     """
-    Generate outcome predictions / linear trend projections.
-    GPU-accelerated when rapids is available.
+    Linear trend projection (least-squares fit) on a numeric column.
+    Returns historical points + projected points with 95% CI bands.
+
+    NOTE: This is a naive extrapolation, not an ML forecast. It assumes
+    the historical linear trend continues unchanged. The What-If simulator
+    uses 'scenario simulation' framing for perturbation deltas — this
+    endpoint is for sanity-checking momentum only.
     """
     session = _get_session(session_id)
     df = session["df"]
-    
+
     result = forecast_series(df, column, periods)
     if not result["historical"]:
         raise HTTPException(status_code=400, detail=result["message"])
-        
+
     return ForecastResponse(
         column=column,
         historical=result["historical"],
