@@ -97,7 +97,7 @@ export default function Landing() {
         }}>
           <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#10B981' }}></div>
           <span style={{ fontSize: 12, fontWeight: 600, color: '#047857' }}>
-            Gen AI Academy APAC · Powered by Gemini · Hosted on Cloud Run
+            Gen AI Academy APAC · Powered by Gemini 2.0 Flash · Hosted on Render + Vercel
           </span>
         </div>
 
@@ -297,8 +297,9 @@ export default function Landing() {
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 20 }}>
             {[
-              { title: 'Gemini 3.5 Flash', desc: 'Summary, opportunity scoring, recommendations, what-if narration, AND chat-with-dataset — 6 distinct AI touchpoints via the z-ai-web-dev SDK', badge: 'LLM (FREE TIER)', icon: '✨' },
-              { title: 'Cloud Run', desc: 'FastAPI routes deploy to Cloud Run — cold-start-friendly, scales to zero, the live demo URL judges will hit', badge: 'SERVERLESS BACKEND', icon: '☁️' },
+              { title: 'Gemini 2.0 Flash', desc: 'Summary, opportunity scoring, recommendations, what-if narration, AND chat-with-dataset — 6 distinct AI touchpoints, with NVIDIA NIM + Ollama fallback', badge: 'PRIMARY LLM', icon: '✨' },
+              { title: '4-Tier LLM Failover', desc: 'Gemini 2.0 Flash → NVIDIA NIM (meta/llama-3.1-8b-instruct) → local Ollama → mock templates. Circuit breaker + RPM limiter keep the demo alive even when Gemini quota exhausts.', badge: 'RESILIENCE LAYER', icon: '🛡️' },
+              { title: 'Render + Vercel', desc: 'FastAPI backend on Render (Dockerized) + React frontend on Vercel. Backend sleeps on the free tier — first request takes ~45s to spin up, then instant.', badge: 'HOSTING', icon: '☁️' },
               { title: 'Deterministic Profiling', desc: 'dtypes, nulls, IQR outliers, correlation matrix — computed before any Gemini call, so the score is never pure AI vibes', badge: 'PRE-AI STATS', icon: '📊' },
               { title: 'Conversational Analytics', desc: 'Ask the data questions in plain English — Gemini answers using the compact profile JSON, with referenced columns highlighted', badge: 'NATURAL LANGUAGE Q&A', icon: '💬' },
               { title: 'Time-to-Insight Clock', desc: 'A live timer from upload to Decision Score, paired with AI-step status chips surfacing Gemini activity as it happens', badge: 'VISIBLE SPEED', icon: '⚡' },
@@ -381,10 +382,10 @@ export default function Landing() {
         </span>
         <div style={{ display: 'flex', gap: 12 }}>
           <span style={{ fontSize: 11, fontWeight: 600, color: '#64748B', background: '#F1F5F9', padding: '4px 10px', borderRadius: 12 }}>
-            Powered by Gemini 3.5 Flash
+            Powered by Gemini 2.0 Flash
           </span>
           <span style={{ fontSize: 11, fontWeight: 600, color: '#64748B', background: '#F1F5F9', padding: '4px 10px', borderRadius: 12 }}>
-            Hosted on Cloud Run
+            Hosted on Render + Vercel
           </span>
         </div>
       </footer>

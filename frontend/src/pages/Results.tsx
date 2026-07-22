@@ -308,7 +308,7 @@ export default function Results() {
                 Gemini 2.0 Flash
               </span>
               <span style={{ fontSize: 12, padding: '3px 10px', background: '#DBEAFE', borderRadius: 20, color: '#1D4ED8', fontWeight: 500 }}>
-                Cloud Run
+                Render + Vercel
               </span>
             </div>
           </div>
