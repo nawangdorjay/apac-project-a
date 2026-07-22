@@ -39,6 +39,17 @@ export async function getProfile(sessionId: string) {
   return res.data
 }
 
+export async function getSessionData(sessionId: string, limit: number = 500) {
+  const res = await api.get(`/api/data/${sessionId}`, { params: { limit } })
+  return res.data as {
+    session_id: string
+    rows: Record<string, unknown>[]
+    total_rows: number
+    returned_rows: number
+    columns: string[]
+  }
+}
+
 export async function getSummary(sessionId: string) {
   const res = await api.post(`/api/summary/${sessionId}`)
   return res.data

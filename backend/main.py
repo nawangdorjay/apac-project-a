@@ -145,6 +145,30 @@ async def upload_file(
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
 
+# ── DATA (full cleaned rows for charts) ───────────────────────────────────────
+
+@app.get("/api/data/{session_id}")
+def get_session_data(session_id: str, limit: int = 500):
+    """
+    Return the cleaned dataset rows (capped at `limit`) for client-side charting.
+    The 5-row preview returned by /api/upload is insufficient for dashboards.
+    """
+    session = _get_session(session_id)
+    df = session["df"]
+
+    limit = max(1, min(int(limit), 2000))  # hard cap at 2000 rows
+    rows = df.head(limit).fillna("").to_dict(orient="records")
+    rows = json.loads(json.dumps(rows, default=str))
+
+    return JSONResponse({
+        "session_id": session_id,
+        "rows": rows,
+        "total_rows": len(df),
+        "returned_rows": len(rows),
+        "columns": list(df.columns),
+    })
+
+
 # ── PROFILE ───────────────────────────────────────────────────────────────────
 
 @app.get("/api/profile/{session_id}")

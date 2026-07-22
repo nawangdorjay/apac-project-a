@@ -1,6 +1,6 @@
 import { Link, useNavigate } from 'react-router-dom'
 import { usePipelineStore, DatasetContext } from '../store/pipelineStore'
-import { uploadDemoDataset, getProfile, getSummary, getDecisionScore } from '../lib/api'
+import { uploadDemoDataset, getProfile, getSessionData, getSummary, getDecisionScore } from '../lib/api'
 
 export default function Landing() {
   const navigate = useNavigate()
@@ -28,7 +28,17 @@ export default function Landing() {
       // Profile
       const profileData = await getProfile(uploadData.session_id)
       store.setProfileData(profileData)
-      store.setStep('summarizing', 'Gemini 3.5 Flash generating summary...')
+
+      // Fetch full cleaned rows for dashboard charts (preview is only 5 rows)
+      try {
+        const dataRes = await getSessionData(uploadData.session_id)
+        store.setChartRows(dataRes.rows)
+      } catch (e) {
+        console.warn('Failed to fetch chart rows', e)
+        store.setChartRows([])
+      }
+
+      store.setStep('summarizing', 'Gemini 2.0 Flash generating summary...')
 
       // Summary
       const summaryData = await getSummary(uploadData.session_id)

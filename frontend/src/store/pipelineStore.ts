@@ -96,6 +96,7 @@ interface PipelineStore {
   rowsBefore: number
   rowsAfter: number
   previewRows: Record<string, unknown>[]
+  chartRows: Record<string, unknown>[]
   profileData: ProfileData | null
   summaryData: SummaryData | null
   scoreData: ScoreData | null
@@ -112,6 +113,7 @@ interface PipelineStore {
   setDatasetContext: (ctx: DatasetContext) => void
   setCleaningLog: (log: string[], rowsBefore: number, rowsAfter: number) => void
   setPreviewRows: (rows: Record<string, unknown>[]) => void
+  setChartRows: (rows: Record<string, unknown>[]) => void
   setProfileData: (data: ProfileData) => void
   setSummaryData: (data: SummaryData) => void
   setScoreData: (data: ScoreData) => void
@@ -133,6 +135,7 @@ export const usePipelineStore = create<PipelineStore>((set) => ({
   rowsBefore: 0,
   rowsAfter: 0,
   previewRows: [],
+  chartRows: [],
   profileData: null,
   summaryData: null,
   scoreData: null,
@@ -146,6 +149,7 @@ export const usePipelineStore = create<PipelineStore>((set) => ({
   setDatasetContext: (ctx) => set({ datasetContext: ctx }),
   setCleaningLog: (log, rowsBefore, rowsAfter) => set({ cleaningLog: log, rowsBefore, rowsAfter }),
   setPreviewRows: (rows) => set({ previewRows: rows }),
+  setChartRows: (rows) => set({ chartRows: rows }),
   setProfileData: (data) => set({ profileData: data }),
   setSummaryData: (data) => set({ summaryData: data }),
   setScoreData: (data) => set({ scoreData: data }),
@@ -156,7 +160,7 @@ export const usePipelineStore = create<PipelineStore>((set) => ({
   reset: () => set({
     sessionId: null, filename: '', step: 'idle', currentStatusLabel: '',
     startTimeMs: null, cleaningLog: [], rowsBefore: 0, rowsAfter: 0,
-    previewRows: [], profileData: null, summaryData: null, scoreData: null,
+    previewRows: [], chartRows: [], profileData: null, summaryData: null, scoreData: null,
     whatIfResult: null, rapidsActive: false, error: null
   }),
 }))

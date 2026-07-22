@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { useDropzone } from 'react-dropzone'
 import { usePipelineStore, DatasetContext } from '../store/pipelineStore'
-import { uploadFile, uploadDemoDataset, getProfile, getSummary, getDecisionScore } from '../lib/api'
+import { uploadFile, uploadDemoDataset, getProfile, getSessionData, getSummary, getDecisionScore } from '../lib/api'
 
 const CONTEXT_OPTIONS: { value: DatasetContext; label: string; icon: string }[] = [
   { value: 'civic', label: 'Smarter Communities', icon: '🏙️' },
@@ -25,6 +25,16 @@ export default function Upload() {
     const profileData = await getProfile(sessionId)
     store.setProfileData(profileData)
     setThoughtStream(prev => [...prev, `📊 Checked dataset structure: profiled ${profileData.columns.length} columns.`])
+
+    // Fetch full cleaned rows for the dashboard charts (preview is only 5 rows)
+    try {
+      const dataRes = await getSessionData(sessionId)
+      store.setChartRows(dataRes.rows)
+    } catch (e) {
+      console.warn('Failed to fetch chart rows, falling back to preview', e)
+      store.setChartRows([])
+    }
+
     await new Promise(r => setTimeout(r, 450))
 
     // 2. Summarization

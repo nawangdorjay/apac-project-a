@@ -437,9 +437,11 @@ export default function Results() {
         {/* Charts */}
         {numericCols.length > 0 && (
           <div className="card animate-fade-in-up" style={{ marginBottom: 20 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
               <div style={{ fontSize: 13, fontWeight: 600, color: '#64748B' }}>DASHBOARD</div>
-              <span style={{ fontSize: 12, color: '#94A3B8' }}>Auto-selected chart type per column</span>
+              <span style={{ fontSize: 12, color: '#94A3B8' }}>
+                Auto-selected chart type per column · {store.chartRows.length > 0 ? `${store.chartRows.length} rows` : '5 preview rows'} shown
+              </span>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 20 }}>
               {numericCols.slice(0, 6).map(col => (
@@ -452,7 +454,7 @@ export default function Results() {
                       </span>
                     )}
                   </div>
-                  <AutoChart col={col} data={store.previewRows.concat([] as Record<string, unknown>[])} />
+                  <AutoChart col={col} data={store.chartRows.length > 0 ? store.chartRows : store.previewRows} />
                   <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
                     {col.mean !== undefined && <span style={{ fontSize: 11, color: '#94A3B8' }}>Mean: {col.mean?.toFixed(1)}</span>}
                     {col.std !== undefined && <span style={{ fontSize: 11, color: '#94A3B8' }}>Std: {col.std?.toFixed(1)}</span>}
