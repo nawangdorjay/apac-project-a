@@ -147,28 +147,110 @@ def perturb_and_rescore(
 ) -> Dict[str, Any]:
     """
     What-If: perturb a column by pct_change% and recompute the Decision Score.
-    Applies performance impact deltas directly to the Opportunity sub-score (1.3x weight)
-    so the simulator reacts dynamically and matches the design specification.
+
+    The scorer is intentionally scale-invariant in some dimensions (CV, IQR),
+    so we also inject a small set of **scenario-aware perturbation deltas**
+    to make the simulator respond visibly to user input:
+
+      - Opportunity sub-score  : direction-aware delta from column polarity
+                                 (positive columns up = good, negative columns up = bad).
+                                 Multiplier raised from 1.3 → 1.6 so a +30% shift
+                                 on a positive column moves Opportunity by ~+24
+                                 points (which translates to ~+3.6 on the final
+                                 score via the 0.15 weight).
+
+      - Trend Stability penalty : any artificial shift represents a deviation from
+                                 the historical pattern. We subtract a small
+                                 penalty proportional to |pct_change|, capped at
+                                 20 points for extreme ±50% scenarios. This makes
+                                 "no change" the highest-stability baseline and
+                                 larger moves cost stability.
+
+      - Risk Inverse penalty    : for positive columns, a decrease raises risk
+                                 (downside exposure). For negative columns, an
+                                 increase raises risk. Symmetric, capped at 15
+                                 points. No penalty for moves in the favorable
+                                 direction (the scenario improves risk).
+
+    These deltas are deterministic and labeled in `scenario_deltas` so the
+    LLM explanation and the UI sub-score comparison can clearly show *which*
+    lever moved and why.
     """
     df_perturbed = df.copy()
     if column in df_perturbed.columns:
         df_perturbed[column] = df_perturbed[column] * (1 + pct_change / 100)
-    
+
     # Rebuild profile for perturbed data
     from services.profiler import profile_dataframe
     perturbed_profile = profile_dataframe(df_perturbed)
-    
-    # Calculate perturbed opportunity score based on column polarity
+
+    # --- Column polarity lookup ---
     col_lower = column.lower().replace(" ", "_")
+    is_positive = col_lower in POSITIVE_COLUMNS
+    is_negative = col_lower in NEGATIVE_COLUMNS
+    # Polarity sign: +1 means "bigger is better", -1 means "smaller is better"
+    polarity = 1 if is_positive else (-1 if is_negative else 0)
+
+    # --- 1. Opportunity delta (directional) ---
+    # multiplier raised to 1.6 (was 1.3) so the slider feels responsive
     opportunity_delta = 0.0
-    if col_lower in POSITIVE_COLUMNS:
-        opportunity_delta = pct_change * 1.3
-    elif col_lower in NEGATIVE_COLUMNS:
-        opportunity_delta = -pct_change * 1.3
-        
+    if polarity != 0:
+        opportunity_delta = polarity * pct_change * 1.6
     new_opportunity = max(0.0, min(100.0, original_opportunity_score + opportunity_delta))
-    
+
+    # --- 2. Trend Stability penalty (any shift = deviation from history) ---
+    # Linear in |pct_change|, capped at 20 points for ±50%.
+    stability_penalty = min(abs(pct_change) * 0.4, 20.0)
+
+    # --- 3. Risk Inverse penalty (directional, only penalize adverse moves) ---
+    # polarity * sign(pct_change) > 0 means favorable direction → no penalty
+    # polarity * sign(pct_change) < 0 means adverse direction → penalty
+    risk_penalty = 0.0
+    if polarity != 0 and pct_change != 0:
+        direction = 1 if pct_change > 0 else -1
+        if polarity * direction < 0:
+            # adverse move
+            risk_penalty = min(abs(pct_change) * 0.3, 15.0)
+
+    # Compute the score with the perturbed df + new opportunity,
+    # then apply stability and risk penalties.
     res = compute_decision_score(df_perturbed, perturbed_profile, new_opportunity)
+
+    # Apply penalties to sub-scores (clamped to [0, 100])
+    res["sub_scores"]["trend_stability"] = round(max(0.0, min(100.0,
+        res["sub_scores"]["trend_stability"] - stability_penalty)), 1)
+    res["sub_scores"]["risk_inverse"] = round(max(0.0, min(100.0,
+        res["sub_scores"]["risk_inverse"] - risk_penalty)), 1)
+
+    # Recompute the weighted Decision Score from the adjusted sub-scores
+    adjusted_score = (
+        0.35 * res["sub_scores"]["data_quality"] +
+        0.25 * res["sub_scores"]["trend_stability"] +
+        0.25 * res["sub_scores"]["risk_inverse"] +
+        0.15 * res["sub_scores"]["opportunity"]
+    )
+    res["score"] = round(max(0.0, min(100.0, adjusted_score)), 1)
+
+    # Re-bucket risk level
+    if res["score"] >= 75:
+        res["risk_level"] = "Low"
+    elif res["score"] >= 50:
+        res["risk_level"] = "Medium"
+    else:
+        res["risk_level"] = "High"
+
+    # Attach a transparent scenario-delta breakdown for the UI / LLM explanation
+    res["scenario_deltas"] = {
+        "column": column,
+        "polarity": "positive" if polarity > 0 else "negative" if polarity < 0 else "neutral",
+        "pct_change": pct_change,
+        "opportunity_delta": round(opportunity_delta, 1),
+        "stability_penalty": round(stability_penalty, 1),
+        "risk_penalty": round(risk_penalty, 1),
+        "original_opportunity": round(float(original_opportunity_score), 1),
+        "new_opportunity": round(float(new_opportunity), 1),
+    }
+
     return res
 
 

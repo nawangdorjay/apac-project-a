@@ -301,6 +301,52 @@ export default function WhatIf() {
               })}
             </div>
 
+            {/* Scenario Lever Breakdown */}
+            {whatIfResult.scenario_deltas && (
+              <div className="card" style={{ marginBottom: 20, background: '#F8FAFC' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: '#64748B' }}>SCENARIO LEVER BREAKDOWN</div>
+                  <span style={{
+                    fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 12,
+                    background: whatIfResult.scenario_deltas.polarity === 'positive' ? '#DCFCE7' :
+                                whatIfResult.scenario_deltas.polarity === 'negative' ? '#FEE2E2' : '#F1F5F9',
+                    color: whatIfResult.scenario_deltas.polarity === 'positive' ? '#16A34A' :
+                           whatIfResult.scenario_deltas.polarity === 'negative' ? '#DC2626' : '#64748B'
+                  }}>
+                    {whatIfResult.scenario_deltas.polarity === 'positive' && '↑ bigger-is-better'}
+                    {whatIfResult.scenario_deltas.polarity === 'negative' && '↓ smaller-is-better'}
+                    {whatIfResult.scenario_deltas.polarity === 'neutral' && '– polarity unknown'}
+                  </span>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12 }}>
+                  <div style={{ background: 'white', borderRadius: 8, padding: 12, border: '1px solid #E2E8F0' }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: '#94A3B8', marginBottom: 4 }}>OPPORTUNITY DELTA</div>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: whatIfResult.scenario_deltas.opportunity_delta > 0 ? '#16A34A' : whatIfResult.scenario_deltas.opportunity_delta < 0 ? '#DC2626' : '#1E293B', fontFamily: 'Space Grotesk, sans-serif' }}>
+                      {whatIfResult.scenario_deltas.opportunity_delta > 0 ? '+' : ''}{whatIfResult.scenario_deltas.opportunity_delta.toFixed(1)}
+                    </div>
+                    <div style={{ fontSize: 10, color: '#94A3B8', marginTop: 2 }}>from column polarity</div>
+                  </div>
+                  <div style={{ background: 'white', borderRadius: 8, padding: 12, border: '1px solid #E2E8F0' }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: '#94A3B8', marginBottom: 4 }}>STABILITY PENALTY</div>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: whatIfResult.scenario_deltas.stability_penalty > 0 ? '#D97706' : '#94A3B8', fontFamily: 'Space Grotesk, sans-serif' }}>
+                      −{whatIfResult.scenario_deltas.stability_penalty.toFixed(1)}
+                    </div>
+                    <div style={{ fontSize: 10, color: '#94A3B8', marginTop: 2 }}>deviation from history</div>
+                  </div>
+                  <div style={{ background: 'white', borderRadius: 8, padding: 12, border: '1px solid #E2E8F0' }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: '#94A3B8', marginBottom: 4 }}>RISK PENALTY</div>
+                    <div style={{ fontSize: 18, fontWeight: 800, color: whatIfResult.scenario_deltas.risk_penalty > 0 ? '#DC2626' : '#94A3B8', fontFamily: 'Space Grotesk, sans-serif' }}>
+                      −{whatIfResult.scenario_deltas.risk_penalty.toFixed(1)}
+                    </div>
+                    <div style={{ fontSize: 10, color: '#94A3B8', marginTop: 2 }}>adverse-direction only</div>
+                  </div>
+                </div>
+                <div style={{ marginTop: 12, padding: '8px 12px', background: 'white', borderRadius: 6, fontSize: 11, color: '#64748B', border: '1px solid #E2E8F0' }}>
+                  💡 These levers are deterministic and labeled — the LLM explanation below uses them to explain exactly which forces drove the score change.
+                </div>
+              </div>
+            )}
+
             {/* Gemini explanation */}
             <div className="card" style={{ background: '#F0FDF4', border: '1px solid #BBF7D0' }}>
               <div style={{ display: 'flex', gap: 10 }}>

@@ -302,7 +302,8 @@ def run_whatif(session_id: str, request: WhatIfRequest):
         "pct_change": request.pct_change,
         "old_score": old_snapshot,
         "new_score": new_score_result,
-        "delta_explanation": delta_explanation
+        "delta_explanation": delta_explanation,
+        "scenario_deltas": new_score_result.get("scenario_deltas", {})
     }
 
     sessions[session_id]["whatif_data"] = whatif_result

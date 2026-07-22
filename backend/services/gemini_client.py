@@ -219,19 +219,46 @@ def generate_whatif_explanation(
     score_delta = new_score["score"] - old_score["score"]
     risk_changed = old_score["risk_level"] != new_score["risk_level"]
 
+    # Per-sub-score deltas (so the LLM can be specific about what moved)
+    old_sub = old_score["sub_scores"]
+    new_sub = new_score["sub_scores"]
+    sub_deltas = {
+        k: round(float(new_sub[k]) - float(old_sub[k]), 1)
+        for k in old_sub
+    }
+
+    # If scenario_deltas is attached to the new score, surface the lever breakdown
+    scenario = new_score.get("scenario_deltas", {}) or {}
+    polarity = scenario.get("polarity", "neutral")
+    opp_delta = scenario.get("opportunity_delta", 0)
+    stab_pen = scenario.get("stability_penalty", 0)
+    risk_pen = scenario.get("risk_penalty", 0)
+
     prompt = f"""You are a data analyst explaining a SCENARIO SIMULATION result (NOT a forecast or prediction).
 
 Scenario applied: '{column}' adjusted by {pct_change:+.0f}% ({abs(pct_change):.0f}% {direction}).
+Column polarity: {polarity} (positive = bigger-is-better, negative = smaller-is-better, neutral = unknown).
 
 Before simulation — Score: {old_score['score']:.1f}  Risk: {old_score['risk_level']}
 After  simulation — Score: {new_score['score']:.1f}  Risk: {new_score['risk_level']}
 Net change: {score_delta:+.1f} points{f" | Risk level changed: {old_score['risk_level']} → {new_score['risk_level']}" if risk_changed else ""}
 
+Sub-score changes:
+  - Data Quality:    {old_sub['data_quality']:.1f} → {new_sub['data_quality']:.1f}  (Δ {sub_deltas['data_quality']:+.1f})
+  - Trend Stability: {old_sub['trend_stability']:.1f} → {new_sub['trend_stability']:.1f}  (Δ {sub_deltas['trend_stability']:+.1f})
+  - Risk Inverse:    {old_sub['risk_inverse']:.1f} → {new_sub['risk_inverse']:.1f}  (Δ {sub_deltas['risk_inverse']:+.1f})
+  - Opportunity:     {old_sub['opportunity']:.1f} → {new_sub['opportunity']:.1f}  (Δ {sub_deltas['opportunity']:+.1f})
+
+Lever breakdown:
+  - Opportunity delta: {opp_delta:+.1f}  (direction-aware, from column polarity)
+  - Stability penalty: -{stab_pen:.1f}   (any artificial shift reduces trend stability)
+  - Risk penalty:      -{risk_pen:.1f}   (only applied on adverse-direction moves)
+
 Write exactly 2–3 plain sentences explaining what this scenario simulation shows and what the user should consider.
 Rules:
   - NEVER use the words "forecast", "predict", or "prediction"
   - ALWAYS use "scenario simulation" or "trend projection"
-  - Be specific about which sub-scores drove the change
+  - Be specific about which sub-scores drove the change (cite the actual deltas above)
   - Be concise and actionable
 
 Return plain text only — no JSON, no bullet points, no headers."""

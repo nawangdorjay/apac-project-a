@@ -72,6 +72,16 @@ export interface WhatIfResult {
   old_score: { score: number; risk_level: RiskLevel; confidence: number; sub_scores: SubScores }
   new_score: { score: number; risk_level: RiskLevel; confidence: number; sub_scores: SubScores }
   delta_explanation: string
+  scenario_deltas?: {
+    column: string
+    polarity: 'positive' | 'negative' | 'neutral'
+    pct_change: number
+    opportunity_delta: number
+    stability_penalty: number
+    risk_penalty: number
+    original_opportunity: number
+    new_opportunity: number
+  }
 }
 
 export interface SummaryData {
