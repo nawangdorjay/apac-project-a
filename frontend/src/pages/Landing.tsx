@@ -1,10 +1,18 @@
+import { useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { usePipelineStore, DatasetContext } from '../store/pipelineStore'
-import { uploadDemoDataset, getProfile, getSessionData, getSummary, getDecisionScore } from '../lib/api'
+import { uploadDemoDataset, getProfile, getSessionData, getSummary, getDecisionScore, warmupBackend } from '../lib/api'
 
 export default function Landing() {
   const navigate = useNavigate()
   const store = usePipelineStore()
+
+  // Fire-and-forget warmup ping on mount — wakes the Render container
+  // before the user clicks anything. By the time they pick a demo, the
+  // backend is already warm and the first real request is fast.
+  useEffect(() => {
+    warmupBackend()
+  }, [])
 
   const handleDemo = async (
     dataset: 'business_sales' | 'personal_finance' | 'urban_environmental' | 'healthcare_wellness' | 'student_performance',

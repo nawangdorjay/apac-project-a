@@ -3,11 +3,13 @@ import Landing from './pages/Landing'
 import Upload from './pages/Upload'
 import Results from './pages/Results'
 import WhatIf from './pages/WhatIf'
+import ColdStartLoader from './components/ColdStartLoader'
 import './index.css'
 
 export default function App() {
   return (
     <BrowserRouter>
+      <ColdStartLoader />
       <Routes>
         <Route path="/" element={<Landing />} />
         <Route path="/upload" element={<Upload />} />

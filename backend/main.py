@@ -79,6 +79,22 @@ def health():
     return {"status": "healthy", "rapids_active": RAPIDS_ACTIVE}
 
 
+@app.get("/api/warmup")
+def warmup():
+    """Lightweight 200-OK endpoint for keep-alive pings.
+
+    Deliberately does NOT touch RAPIDS, sessions, or any heavy module —
+    just confirms the uvicorn worker is alive. Used by:
+      - Vercel cron (vercel.json) every 5 minutes
+      - UptimeRobot / external monitors
+      - Frontend warmup ping on Landing page mount
+
+    The goal is to keep the Render free-tier container from sleeping
+    (Render sleeps after 15 min of inactivity on the free tier).
+    """
+    return {"ok": True, "ts": int(time.time() * 1000)}
+
+
 # ── SESSION RESTORE & LLM STATUS ─────────────────────────────────────────────
 
 @app.get("/api/restore/{session_id}")
