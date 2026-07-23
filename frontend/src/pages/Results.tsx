@@ -5,7 +5,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell
 } from 'recharts'
 import { usePipelineStore } from '../store/pipelineStore'
-import { generateReport, restoreSession, getSessionData } from '../lib/api'
+import { generateReport, restoreSession, getSessionData, getForecast, runAutomation, sendChat } from '../lib/api'
 import type { ColumnProfile } from '../store/pipelineStore'
 import LlmStatusBadge from '../components/LlmStatusBadge'
 
@@ -157,7 +157,6 @@ export default function Results() {
     if (!sessionId || !col) return
     setForecastLoading(true)
     try {
-      const { getForecast } = await import('../lib/api')
       const data = await getForecast(sessionId, col)
       setForecastData(data)
       setForecastMessage(data.message)
@@ -174,7 +173,6 @@ export default function Results() {
     setAutomationLoading(true)
     setActiveRecommendation(recText)
     try {
-      const { runAutomation } = await import('../lib/api')
       const data = await runAutomation(sessionId, recText)
       setAutomationResult(data)
     } catch (e) {
@@ -673,7 +671,6 @@ export default function Results() {
                   const newHistory = [...chatHistory, { role: 'user', content: msg }]
                   setChatHistory(newHistory)
                   try {
-                    const { sendChat } = await import('../lib/api')
                     const res = await sendChat(sessionId, msg, newHistory)
                     setChatHistory([...newHistory, { role: 'assistant', content: res.reply }])
                   } catch {
