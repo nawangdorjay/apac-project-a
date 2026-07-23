@@ -84,6 +84,44 @@ _gemini_block_lock = threading.Lock()
 
 _rate_limiter = _SlidingWindowRateLimiter(RPM_LIMIT)
 
+# ── Last-tier-used tracker (for /api/llm-status badge) ───────────────────────
+
+_last_tier_used = "none"  # one of: "gemini", "nvidia_nim", "ollama", "mock", "none"
+_last_tier_lock = threading.Lock()
+
+def _set_last_tier(tier: str) -> None:
+    global _last_tier_used
+    with _last_tier_lock:
+        _last_tier_used = tier
+
+def get_last_tier_used() -> dict:
+    """Return which tier answered the most recent safe_generate() call,
+    plus a human-readable label and a status color for the UI badge."""
+    with _last_tier_lock:
+        tier = _last_tier_used
+    labels = {
+        "gemini":      {"label": "Gemini 2.0 Flash",   "color": "#8E75C2", "icon": "✨", "tier": 1},
+        "nvidia_nim":  {"label": "NVIDIA NIM Fallback", "color": "#76B900", "icon": "🟢", "tier": 2},
+        "ollama":      {"label": "Local Ollama",        "color": "#0891B2", "icon": "🏠", "tier": 3},
+        "mock":        {"label": "Static Mock Templates", "color": "#D97706", "icon": "📋", "tier": 4},
+        "none":        {"label": "No calls yet",        "color": "#64748B", "icon": "○",  "tier": 0},
+    }
+    return {"tier": tier, **labels.get(tier, labels["none"])}
+
+def get_circuit_breaker_state() -> dict:
+    """Return whether Gemini is currently circuit-broken and until when."""
+    with _gemini_block_lock:
+        now = time.time()
+        if now < _gemini_blocked_until:
+            remaining_sec = int(_gemini_blocked_until - now)
+            return {
+                "active": True,
+                "blocked_until": _gemini_blocked_until,
+                "remaining_sec": remaining_sec,
+                "reason": "429 / quota exhausted — pivoting to fallbacks",
+            }
+    return {"active": False, "remaining_sec": 0}
+
 # ── Response cache (in-process, keyed by prompt hash) ────────────────────────
 
 _cache: dict[str, str] = {}
@@ -212,6 +250,7 @@ def safe_generate(
             print(f"[safe_gemini] Pivoting to NVIDIA NIM Cloud API: '{NVIDIA_MODEL}'...")
             response_text = _generate_via_nvidia_nim(prompt, json_mode)
             if response_text:
+                _set_last_tier("nvidia_nim")
                 if use_cache:
                     _set_cached(key, response_text)
                 return response_text
@@ -222,10 +261,13 @@ def safe_generate(
             print(f"[safe_gemini] Pivoting to local Ollama model: '{ollama_model}'...")
             response_text = _generate_via_ollama(prompt, json_mode, ollama_model)
             if response_text:
+                _set_last_tier("ollama")
                 if use_cache:
                     _set_cached(key, response_text)
                 return response_text
 
+        # 3. No fallbacks available — caller will use mock templates
+        _set_last_tier("mock")
         raise GeminiFallbackError("No active Gemini API key or fallbacks (NVIDIA NIM/Ollama) available.")
 
     # Token budget guard
@@ -259,6 +301,7 @@ def safe_generate(
                 config=config,
             )
             text = response.text or ""
+            _set_last_tier("gemini")
             if use_cache:
                 _set_cached(key, text)
             return text
@@ -309,6 +352,7 @@ def safe_generate(
                 print(f"[safe_gemini] Gemini API error. Pivoting to NVIDIA NIM Cloud API: '{NVIDIA_MODEL}'...")
                 response_text = _generate_via_nvidia_nim(prompt, json_mode)
                 if response_text:
+                    _set_last_tier("nvidia_nim")
                     if use_cache:
                         _set_cached(key, response_text)
                     return response_text
@@ -318,10 +362,12 @@ def safe_generate(
                 print(f"[safe_gemini] Gemini API error. Pivoting to local Ollama model: '{ollama_model}'...")
                 response_text = _generate_via_ollama(prompt, json_mode, ollama_model)
                 if response_text:
+                    _set_last_tier("ollama")
                     if use_cache:
                         _set_cached(key, response_text)
                     return response_text
-                    
+
+            _set_last_tier("mock")
             raise GeminiFallbackError(str(e)) from e
 
     raise GeminiFallbackError("Exhausted all retries")

@@ -35,6 +35,7 @@ from services.gemini_client import (
     generate_recommendations, generate_whatif_explanation, generate_chat_response
 )
 from services.pdf_generator import generate_pdf_report
+from services import session_store
 
 load_dotenv()
 
@@ -52,7 +53,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# In-memory session store (for hackathon; replace with Redis/DB for production)
+# Sessions are now persisted to SQLite (services/session_store.py) so they
+# survive Render free-tier restarts. The dict below is kept ONLY as a
+# per-process LRU cache for hot sessions; the source of truth is the DB.
 sessions: Dict[str, Dict[str, Any]] = {}
 
 DEMO_DATA_DIR = Path(__file__).parent / "demo_data"
@@ -74,6 +77,89 @@ def root():
 @app.get("/health")
 def health():
     return {"status": "healthy", "rapids_active": RAPIDS_ACTIVE}
+
+
+# ── SESSION RESTORE & LLM STATUS ─────────────────────────────────────────────
+
+@app.get("/api/restore/{session_id}")
+def restore_session(session_id: str):
+    """
+    Rebuild the full frontend state after a page refresh / backend restart.
+
+    Returns everything the frontend needs to re-render the Results page
+    without re-running the pipeline: cleaning log, preview rows, profile,
+    summary, score, whatif (if run), and metadata.
+
+    If the session has been cleaned up (24h TTL), returns 404 — the
+    frontend should then prompt the user to start a new analysis.
+    """
+    try:
+        session = _get_session(session_id)
+    except HTTPException:
+        raise
+
+    df = session["df"]
+    preview_rows = df.head(5).fillna("").to_dict(orient="records")
+    preview_rows = json.loads(json.dumps(preview_rows, default=str))
+
+    # Compute nulls_pct aggregate for the stats strip
+    cols = session.get("profile_data", {}).get("columns", []) if session.get("profile_data") else []
+    avg_nulls = (
+        sum(c.get("nulls_pct", 0) for c in cols) / len(cols)
+        if cols else 0.0
+    )
+
+    return {
+        "session_id": session_id,
+        "found": True,
+        "filename": session.get("filename", "upload.csv"),
+        "dataset_context": session.get("dataset_context", "business"),
+        "cleaning_log": session.get("cleaning_log", []),
+        "rows_before": session.get("rows_before", 0),
+        "rows_after": session.get("rows_after", 0),
+        "preview_rows": preview_rows,
+        "profile_data": session.get("profile_data"),
+        "summary_data": session.get("summary_data"),
+        "score_data": session.get("score_data"),
+        "whatif_data": session.get("whatif_data"),
+        "time_to_insight_ms": session.get("time_to_insight_ms"),
+        "rapids_active": RAPIDS_ACTIVE,
+        "avg_nulls_pct": round(avg_nulls, 2),
+        "created_at": session.get("created_at"),
+    }
+
+
+@app.get("/api/llm-status")
+def llm_status():
+    """
+    Surface the current state of the 4-tier LLM failover.
+
+    Returns:
+      - configured_tiers: which tiers have API keys / are reachable
+      - last_tier_used: which tier answered the most recent call
+      - circuit_breaker: whether Gemini is currently blocked (and until when)
+      - cache_entries: response cache size
+      - rpm_usage: sliding-window RPM usage
+    """
+    from services.safe_gemini import get_status, get_last_tier_used, get_circuit_breaker_state
+    status = get_status()
+    return {
+        **status,
+        "last_tier_used": get_last_tier_used(),
+        "circuit_breaker": get_circuit_breaker_state(),
+        "tiers": [
+            {"name": "Gemini 2.0 Flash", "type": "cloud", "active": bool(status["api_key_configured"])},
+            {"name": "NVIDIA NIM", "type": "cloud", "active": bool(os.getenv("NVIDIA_API_KEY", "").strip())},
+            {"name": "Ollama (local)", "type": "local", "active": True},  # probed on demand
+            {"name": "Mock Templates", "type": "static", "active": True},
+        ],
+    }
+
+
+@app.get("/api/sessions/count")
+def sessions_count():
+    """For admin/debug: how many sessions are persisted."""
+    return {"count": session_store.count_sessions()}
 
 
 # ── UPLOAD ────────────────────────────────────────────────────────────────────
@@ -114,6 +200,17 @@ async def upload_file(
         # Convert any numpy types to Python native
         preview_rows = json.loads(json.dumps(preview_rows, default=str))
 
+        # Persist to SQLite (source of truth) AND in-process cache
+        session_store.create_session(
+            session_id=session_id,
+            df=df_clean,
+            filename=filename,
+            dataset_context=dataset_context,
+            cleaning_log=cleaning_log,
+            rows_before=rows_before,
+            rows_after=rows_after,
+            start_time_ms=start_time,
+        )
         sessions[session_id] = {
             "df": df_clean,
             "filename": filename,
@@ -182,7 +279,7 @@ def get_profile(session_id: str):
 
     profile = profile_dataframe(df)
     profile["session_id"] = session_id
-    sessions[session_id]["profile_data"] = profile
+    _persist_session_field(session_id, "profile_data", profile)
 
     return profile
 
@@ -201,7 +298,7 @@ def get_summary(session_id: str):
 
     dataset_context = session.get("dataset_context", "business")
     summary = generate_summary(profile, dataset_context)
-    sessions[session_id]["summary_data"] = summary
+    _persist_session_field(session_id, "summary_data", summary)
 
     summary["session_id"] = session_id
     return summary
@@ -250,6 +347,8 @@ def get_decision_score(session_id: str):
 
     sessions[session_id]["score_data"] = score_data
     sessions[session_id]["time_to_insight_ms"] = time_to_insight_ms
+    _persist_session_field(session_id, "score_data", score_data)
+    _persist_session_field(session_id, "time_to_insight_ms", time_to_insight_ms)
 
     return score_data
 
@@ -307,6 +406,7 @@ def run_whatif(session_id: str, request: WhatIfRequest):
     }
 
     sessions[session_id]["whatif_data"] = whatif_result
+    _persist_session_field(session_id, "whatif_data", whatif_result)
     return whatif_result
 
 
@@ -440,9 +540,38 @@ def run_automation(session_id: str, request: AutomationRequest):
 # ── SESSION HELPER ────────────────────────────────────────────────────────────
 
 def _get_session(session_id: str) -> Dict[str, Any]:
-    if session_id not in sessions:
-        raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found. Please upload a file first.")
-    return sessions[session_id]
+    """Fetch a session by id. Tries in-process cache first, then SQLite.
+
+    On cache miss, hydrates from DB and caches. This means a judge who
+    refreshes the page after a Render restart can still recover their
+    session if the SQLite file persisted.
+    """
+    if session_id in sessions:
+        return sessions[session_id]
+
+    persisted = session_store.get_session(session_id)
+    if persisted is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Session '{session_id}' not found. Please upload a file first. "
+                   "If you refreshed the page after the backend restarted, the session "
+                   "may have been cleaned up (24h TTL)."
+        )
+    # Hydrate cache
+    sessions[session_id] = persisted
+    return persisted
+
+
+def _persist_session_field(session_id: str, field: str, value: Any) -> None:
+    """Update both the in-process cache AND the SQLite store."""
+    if session_id in sessions:
+        sessions[session_id][field] = value
+    try:
+        session_store.update_session_field(session_id, field, value)
+    except Exception as e:
+        # Don't crash the request if persistence fails — the in-process
+        # cache is still authoritative for the rest of this request.
+        print(f"[session_store] WARNING: failed to persist {field} for {session_id}: {e}")
 
 
 # ── ENTRY POINT ───────────────────────────────────────────────────────────────
