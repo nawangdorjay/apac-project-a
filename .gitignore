@@ -31,3 +31,7 @@ frontend/.env
 .idea/
 .DS_Store
 Thumbs.db
+
+# SQLite session store (runtime)
+backend/sessions.db
+*.db
