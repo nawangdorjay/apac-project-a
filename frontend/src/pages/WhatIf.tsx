@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { usePipelineStore } from '../store/pipelineStore'
-import { runWhatIf, generateReport } from '../lib/api'
+import { runWhatIf, generateReport, restoreSession } from '../lib/api'
+import LlmStatusBadge from '../components/LlmStatusBadge'
 
 export default function WhatIf() {
   const navigate = useNavigate()
@@ -17,6 +18,21 @@ export default function WhatIf() {
 
   useEffect(() => {
     if (!sessionId || !scoreData) {
+      // Try restore from backend (handles page refresh / backend restart)
+      const savedId = typeof window !== 'undefined'
+        ? window.localStorage.getItem('dl_session_id')
+        : null
+      if (savedId) {
+        restoreSession(savedId)
+          .then(restored => {
+            store.hydrateFromRestored(restored)
+            if (!restored.score_data) {
+              navigate('/', { replace: true })
+            }
+          })
+          .catch(() => navigate('/', { replace: true }))
+        return
+      }
       navigate('/')
       return
     }
@@ -24,6 +40,7 @@ export default function WhatIf() {
     if (numericCols.length > 0 && !selectedCol) {
       setSelectedCol(numericCols[0])
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   if (!scoreData || !profileData) {
@@ -87,7 +104,8 @@ export default function WhatIf() {
           </div>
           <span style={{ fontFamily: 'Space Grotesk, sans-serif', fontWeight: 700, fontSize: 15, color: '#1E293B' }}>DecisionLens AI</span>
         </Link>
-        <div style={{ display: 'flex', gap: 10 }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <LlmStatusBadge />
           <Link to="/results" className="btn-ghost">← Back to Results</Link>
           <button className="btn-primary" style={{ fontSize: 12, padding: '6px 12px' }} onClick={handleExport} disabled={exporting}>
             {exporting ? '⏳ Generating...' : '📄 Export PDF (with this scenario)'}

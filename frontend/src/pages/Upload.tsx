@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom'
 import { useDropzone } from 'react-dropzone'
 import { usePipelineStore, DatasetContext } from '../store/pipelineStore'
 import { uploadFile, uploadDemoDataset, getProfile, getSessionData, getSummary, getDecisionScore } from '../lib/api'
+import LlmStatusBadge from '../components/LlmStatusBadge'
 
 const CONTEXT_OPTIONS: { value: DatasetContext; label: string; icon: string }[] = [
   { value: 'civic', label: 'Smarter Communities', icon: '🏙️' },
@@ -159,7 +160,10 @@ export default function Upload() {
           </div>
           <span style={{ fontFamily: 'Space Grotesk, sans-serif', fontWeight: 700, fontSize: 15, color: '#1E293B' }}>DecisionLens AI</span>
         </Link>
-        <Link to="/" className="btn-ghost">← Back</Link>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <LlmStatusBadge />
+          <Link to="/" className="btn-ghost">← Back</Link>
+        </div>
       </nav>
 
       <div style={{ maxWidth: 700, margin: '0 auto', padding: '24px 24px' }}>

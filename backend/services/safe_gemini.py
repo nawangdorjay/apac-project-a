@@ -100,13 +100,20 @@ def get_last_tier_used() -> dict:
     with _last_tier_lock:
         tier = _last_tier_used
     labels = {
-        "gemini":      {"label": "Gemini 2.0 Flash",   "color": "#8E75C2", "icon": "✨", "tier": 1},
-        "nvidia_nim":  {"label": "NVIDIA NIM Fallback", "color": "#76B900", "icon": "🟢", "tier": 2},
-        "ollama":      {"label": "Local Ollama",        "color": "#0891B2", "icon": "🏠", "tier": 3},
-        "mock":        {"label": "Static Mock Templates", "color": "#D97706", "icon": "📋", "tier": 4},
-        "none":        {"label": "No calls yet",        "color": "#64748B", "icon": "○",  "tier": 0},
+        "gemini":      {"label": "Gemini 2.0 Flash",   "color": "#8E75C2", "icon": "✨", "tier_rank": 1},
+        "nvidia_nim":  {"label": "NVIDIA NIM Fallback", "color": "#76B900", "icon": "🟢", "tier_rank": 2},
+        "ollama":      {"label": "Local Ollama",        "color": "#0891B2", "icon": "🏠", "tier_rank": 3},
+        "mock":        {"label": "Static Mock Templates", "color": "#D97706", "icon": "📋", "tier_rank": 4},
+        "none":        {"label": "No calls yet",        "color": "#64748B", "icon": "○",  "tier_rank": 0},
     }
-    return {"tier": tier, **labels.get(tier, labels["none"])}
+    meta = labels.get(tier, labels["none"])
+    return {
+        "tier": tier,                  # string name: "gemini" / "nvidia_nim" / "ollama" / "mock" / "none"
+        "tier_rank": meta["tier_rank"], # integer 0-4 for sorting / display
+        "label": meta["label"],
+        "color": meta["color"],
+        "icon": meta["icon"],
+    }
 
 def get_circuit_breaker_state() -> dict:
     """Return whether Gemini is currently circuit-broken and until when."""

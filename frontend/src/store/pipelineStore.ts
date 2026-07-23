@@ -132,6 +132,7 @@ interface PipelineStore {
   setError: (err: string | null) => void
   startClock: () => void
   reset: () => void
+  hydrateFromRestored: (r: any) => void
 }
 
 export const usePipelineStore = create<PipelineStore>((set) => ({
@@ -154,7 +155,13 @@ export const usePipelineStore = create<PipelineStore>((set) => ({
   error: null,
 
   setStep: (step, label = '') => set({ step, currentStatusLabel: label }),
-  setSessionId: (id) => set({ sessionId: id }),
+  setSessionId: (id) => {
+    if (typeof window !== 'undefined') {
+      if (id) window.localStorage.setItem('dl_session_id', id)
+      else window.localStorage.removeItem('dl_session_id')
+    }
+    set({ sessionId: id })
+  },
   setFilename: (name) => set({ filename: name }),
   setDatasetContext: (ctx) => set({ datasetContext: ctx }),
   setCleaningLog: (log, rowsBefore, rowsAfter) => set({ cleaningLog: log, rowsBefore, rowsAfter }),
@@ -167,10 +174,42 @@ export const usePipelineStore = create<PipelineStore>((set) => ({
   setRapidsActive: (active) => set({ rapidsActive: active }),
   setError: (err) => set({ error: err }),
   startClock: () => set({ startTimeMs: Date.now() }),
-  reset: () => set({
-    sessionId: null, filename: '', step: 'idle', currentStatusLabel: '',
-    startTimeMs: null, cleaningLog: [], rowsBefore: 0, rowsAfter: 0,
-    previewRows: [], chartRows: [], profileData: null, summaryData: null, scoreData: null,
-    whatIfResult: null, rapidsActive: false, error: null
-  }),
+  reset: () => {
+    if (typeof window !== 'undefined') {
+      window.localStorage.removeItem('dl_session_id')
+    }
+    set({
+      sessionId: null, filename: '', step: 'idle', currentStatusLabel: '',
+      startTimeMs: null, cleaningLog: [], rowsBefore: 0, rowsAfter: 0,
+      previewRows: [], chartRows: [], profileData: null, summaryData: null, scoreData: null,
+      whatIfResult: null, rapidsActive: false, error: null
+    })
+  },
+
+  // Rebuild store state from /api/restore response after a page refresh
+  // or backend restart. Avoids re-running the pipeline.
+  hydrateFromRestored: (r: any) => {
+    if (typeof window !== 'undefined' && r.session_id) {
+      window.localStorage.setItem('dl_session_id', r.session_id)
+    }
+    set({
+      sessionId: r.session_id,
+      filename: r.filename || 'dataset',
+      datasetContext: (r.dataset_context as DatasetContext) || 'business',
+      cleaningLog: r.cleaning_log || [],
+      rowsBefore: r.rows_before || 0,
+      rowsAfter: r.rows_after || 0,
+      previewRows: r.preview_rows || [],
+      // chartRows will be re-fetched separately if needed
+      chartRows: [],
+      profileData: r.profile_data || null,
+      summaryData: r.summary_data || null,
+      scoreData: r.score_data || null,
+      whatIfResult: r.whatif_data || null,
+      rapidsActive: !!r.rapids_active,
+      step: 'done',
+      currentStatusLabel: '',
+      error: null,
+    })
+  },
 }))

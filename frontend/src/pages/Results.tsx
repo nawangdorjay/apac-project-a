@@ -5,8 +5,9 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell
 } from 'recharts'
 import { usePipelineStore } from '../store/pipelineStore'
-import { generateReport } from '../lib/api'
+import { generateReport, restoreSession, getSessionData } from '../lib/api'
 import type { ColumnProfile } from '../store/pipelineStore'
+import LlmStatusBadge from '../components/LlmStatusBadge'
 
 // Score Gauge SVG component
 function ScoreGauge({ score, riskLevel }: { score: number; riskLevel: string }) {
@@ -183,9 +184,34 @@ export default function Results() {
   }
 
   useEffect(() => {
+    // If store has no scoreData but we have a sessionId in localStorage,
+    // try to restore from backend (handles page refresh / backend restart).
     if (!sessionId || !scoreData) {
+      const savedId = typeof window !== 'undefined'
+        ? window.localStorage.getItem('dl_session_id')
+        : null
+      if (savedId) {
+        console.info('[Results] No scoreData in store, attempting /api/restore for', savedId)
+        restoreSession(savedId)
+          .then(restored => {
+            store.hydrateFromRestored(restored)
+            // Also fetch chart rows in the background so charts aren't empty
+            getSessionData(savedId).then(d => store.setChartRows(d.rows)).catch(() => {})
+          })
+          .catch(err => {
+            console.warn('[Results] Restore failed', err)
+            // Session expired or backend wiped — send user home
+            navigate('/', { replace: true })
+          })
+        return
+      }
+      // No saved session at all
       navigate('/')
       return
+    }
+    // Store has data — also fetch chart rows if missing (e.g. came in via Landing demo)
+    if (store.chartRows.length === 0) {
+      getSessionData(sessionId).then(d => store.setChartRows(d.rows)).catch(() => {})
     }
     const numericCols = profileData?.columns.filter(c => c.dtype.includes('int') || c.dtype.includes('float')) ?? []
     if (numericCols.length > 0) {
@@ -193,6 +219,7 @@ export default function Results() {
       setSelectedForecastCol(firstCol)
       handleFetchForecast(firstCol)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   if (!scoreData || !profileData) {
@@ -298,15 +325,13 @@ export default function Results() {
                 <span style={{ fontSize: 13, color: '#64748B', marginLeft: 12 }}>Manual analysis typically takes 15–30 minutes</span>
               </div>
             </div>
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
               {store.rapidsActive && (
                 <span style={{ fontSize: 12, padding: '3px 10px', background: '#DCFCE7', borderRadius: 20, color: '#16A34A', fontWeight: 600, border: '1px solid #BBF7D0' }}>
                   ⚡ NVIDIA RAPIDS GPU
                 </span>
               )}
-              <span style={{ fontSize: 12, padding: '3px 10px', background: '#DBEAFE', borderRadius: 20, color: '#1D4ED8', fontWeight: 500 }}>
-                Gemini 2.0 Flash
-              </span>
+              <LlmStatusBadge />
               <span style={{ fontSize: 12, padding: '3px 10px', background: '#DBEAFE', borderRadius: 20, color: '#1D4ED8', fontWeight: 500 }}>
                 Render + Vercel
               </span>
