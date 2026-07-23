@@ -32,16 +32,25 @@
 1.  **🧹 Automated Data Cleaning & Profiling:** 
     Resolves duplicates, normalizes null values (median/mode fill), sanitizes inputs, and builds column profiles (cardinality, correlations, outlier counts).
 2.  **⚖️ Transparent Decision Intelligence Scorer:** 
-    Calculates an objective, deterministic score (0–100) combining Data Quality, Trend Metrics, and Risk Ratios, blended with a capped (15% max weight) Gemini-derived opportunity index to prevent AI bias.
+    Calculates an objective, deterministic score (0–100) combining Data Quality, Trend Metrics, and Risk Ratios, blended with a capped (15% max weight) Gemini-derived opportunity index to prevent AI bias. Every sub-score ships with a **per-component math breakdown** (formula + raw values + weights) accessible via the "🧮 Show Full Math" modal — no black boxes.
 3.  **🎛️ "What-If" Scenario Simulator:** 
-    Interact with sliders to test perturbations (e.g. increase public transit ridership by 30%), recompute the scoring formula instantly on CPU/GPU, and receive real-time, plain-language impacts narrated by the LLM.
-4.  **🛡️ 4-Tier Redundant LLM Failover System:** 
+    Interact with sliders to test perturbations (e.g. increase public transit ridership by 30%), recompute the scoring formula instantly, and receive real-time, plain-language impacts narrated by the LLM. Includes a **"SCENARIO LEVER BREAKDOWN"** card showing exactly which forces (Opportunity Δ, Stability Penalty, Risk Penalty) drove the score change.
+4.  **⚖️ Side-by-Side Scenario Comparison:** 
+    Run two scenarios simultaneously (e.g. "Revenue +10% vs Expenses −10%") and see which produces a better score. Pure math — no LLM call — so it's instant (~24ms). Winner badge + sub-score delta table. Click "Use Scenario X → Get Gemini analysis" to drill into the winner with a narrative explanation.
+5.  **🛡️ 4-Tier Redundant LLM Failover System:** 
     Bulletproof routing engine that guarantees API uptime during high traffic or quota exhaustions:
     $$\text{Gemini API (Cloud)} \longrightarrow \text{NVIDIA NIM (Cloud)} \longrightarrow \text{Ollama (Local/Network)} \longrightarrow \text{Mock Templates (Local)}$$
-5.  **🖨️ PDF Executive Report Generator:** 
-    Export clean, print-ready ReportLab-generated PDF files detailing analysis summaries, scorecards, and simulator deltas.
-6.  **⚡ NVIDIA cuDF Acceleration:** 
+    A **live LLM tier badge** in the nav shows which tier answered the most recent call, plus circuit breaker state and cache/RPM stats — judges can SEE the failover happening.
+6.  **🖨️ PDF Executive Report Generator:** 
+    Export clean, print-ready ReportLab-generated PDF files with **embedded visual charts**: semicircle score gauge, colored sub-score bars, and what-if lever breakdown chart. No longer text-only.
+7.  **💾 Session Persistence:** 
+    Sessions are stored in SQLite (not in-memory), so a page refresh or Render backend restart mid-demo recovers your full state automatically via `/api/restore`. No more "Session not found" dead-ends.
+8.  **⚡ NVIDIA cuDF Acceleration:** 
     Integrates zero-code-change GPU acceleration. Uses RAPIDS `cudf.pandas` if hosted on a CUDA-supported environment, failing back seamlessly to CPU pandas.
+9.  **🤖 Conversational Analytics:** 
+    Ask questions in plain English ("What correlates with PM2.5?" or "Which neighborhood has the worst wait time?"). Gemini answers using the compact profile JSON, citing specific columns. Raw data never leaves the server.
+10. **🔮 Linear Trend Projection:** 
+    Least-squares fit on any numeric column, projected forward 3 periods with 95% CI bands. Honestly labeled as "naive extrapolation" — not an ML forecast.
 
 ---
 
@@ -64,9 +73,49 @@
 
 ## 🛠️ Tech Stack
 
-*   **Frontend:** Vite, React, TypeScript, Tailwind CSS, Recharts, Zustand.
-*   **Backend:** FastAPI, Pandas, NumPy, OpenPyXL, ReportLab, Google GenAI SDK.
-*   **Hosting:** Vercel (Frontend), Render (Backend / Dockerized).
+*   **Frontend:** Vite, React, TypeScript, Tailwind CSS, Recharts, Zustand, Axios.
+*   **Backend:** FastAPI, Pandas, NumPy, OpenPyXL, ReportLab, Matplotlib, Google GenAI SDK, SQLite (session persistence).
+*   **LLM Stack:** Google Gemini 2.0 Flash (primary), NVIDIA NIM `meta/llama-3.1-8b-instruct` (fallback 1), Ollama (fallback 2), Mock Templates (fallback 3).
+*   **Hosting:** Vercel (Frontend + Cron), Render (Backend / Dockerized).
+
+---
+
+## 📋 API Endpoints
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/` | Root — API info + RAPIDS status |
+| GET | `/health` | Health check |
+| GET | `/api/warmup` | Lightweight keep-alive ping (for Vercel Cron) |
+| POST | `/api/upload` | Upload CSV/XLSX or select demo dataset → returns session_id |
+| GET | `/api/data/{session_id}` | Full cleaned rows (for dashboard charts) |
+| GET | `/api/profile/{session_id}` | Deterministic column profiling (dtypes, nulls, outliers, correlations) |
+| POST | `/api/summary/{session_id}` | Gemini narrative summary + key findings |
+| POST | `/api/decision-score/{session_id}` | Decision Score + sub-scores + recommendations + math breakdown |
+| POST | `/api/whatif/{session_id}` | Single scenario simulation |
+| POST | `/api/whatif/compare/{session_id}` | Side-by-side scenario comparison (no LLM call) |
+| POST | `/api/report/{session_id}` | Generate PDF with embedded charts |
+| POST | `/api/chat/{session_id}` | Conversational Q&A with dataset |
+| GET | `/api/forecast/{session_id}` | Linear trend projection (naive extrapolation) |
+| POST | `/api/automate/{session_id}` | Simulated workflow automation trigger |
+| GET | `/api/restore/{session_id}` | Rebuild frontend state after refresh/restart |
+| GET | `/api/llm-status` | Live 4-tier failover state + circuit breaker + cache stats |
+| GET | `/api/sessions/count` | Admin: persisted session count |
+
+Full interactive docs at `/docs` (Swagger UI).
+
+---
+
+## ⚠️ Known Limitations
+
+We believe in being honest about what this is and isn't:
+
+1.  **Render free-tier cold starts:** Despite our 5-layer mitigation, the first request after 15+ min of inactivity may still take 30–60s. The cold-start banner will tell you when this is happening.
+2.  **Trend projection is naive:** The `/api/forecast` endpoint uses simple least-squares linear extrapolation — not an ML model. It assumes the historical trend continues unchanged and cannot predict shocks, seasonality, or regime changes. We label it honestly as "linear extrapolation" throughout the UI.
+3.  **Opportunity sub-score is AI-derived:** The only non-deterministic component of the Decision Score is the Opportunity sub-score (capped at 15% weight). Everything else is pure math computed from dataset statistics.
+4.  **Sessions have a 24h TTL:** SQLite sessions are cleaned up after 24 hours to prevent the DB from growing forever. Active demos are not affected.
+5.  **Column polarity is hardcoded:** The What-If simulator uses a predefined `POSITIVE_COLUMNS` / `NEGATIVE_COLUMNS` set to determine direction-aware deltas. Columns not in either set are treated as "neutral" (only stability penalty applies). Future versions could infer polarity from column semantics.
+6.  **No authentication:** This is a hackathon demo. Anyone with the URL can use it. Don't upload sensitive data.
 
 ---
 
