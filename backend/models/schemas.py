@@ -74,6 +74,10 @@ class WhatIfRequest(BaseModel):
     column: str
     pct_change: float
 
+class WhatIfCompareRequest(BaseModel):
+    scenario_a: WhatIfRequest
+    scenario_b: WhatIfRequest
+
 class ScoreSnapshot(BaseModel):
     score: float
     risk_level: str

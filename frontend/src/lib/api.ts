@@ -227,6 +227,61 @@ export async function runWhatIf(
   })
 }
 
+export interface WhatIfScenario {
+  column: string
+  pct_change: number
+}
+
+export interface WhatIfCompareResult {
+  session_id: string
+  baseline: {
+    score: number
+    risk_level: string
+    confidence: number
+    sub_scores: Record<string, number>
+  }
+  scenario_a: {
+    column: string
+    pct_change: number
+    new_score: {
+      score: number
+      risk_level: string
+      confidence: number
+      sub_scores: Record<string, number>
+      scenario_deltas: any
+    }
+  }
+  scenario_b: {
+    column: string
+    pct_change: number
+    new_score: {
+      score: number
+      risk_level: string
+      confidence: number
+      sub_scores: Record<string, number>
+      scenario_deltas: any
+    }
+  }
+  delta_between: {
+    score: number
+    risk_level_changed: boolean
+    sub_scores: Record<string, number>
+  }
+  winner: 'A' | 'B' | 'tie'
+}
+
+export async function runWhatIfCompare(
+  sessionId: string,
+  scenarioA: WhatIfScenario,
+  scenarioB: WhatIfScenario
+): Promise<WhatIfCompareResult> {
+  return coldStartRequest<WhatIfCompareResult>({
+    url: `/api/whatif/compare/${sessionId}`,
+    method: 'POST',
+    data: { scenario_a: scenarioA, scenario_b: scenarioB },
+  })
+}
+
 export async function generateReport(sessionId: string): Promise<Blob> {
   // Blob responses need special handling — don't go through coldStartRequest
   // because it expects parsed JSON. Use api directly with cold-start timeout.

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { usePipelineStore } from '../store/pipelineStore'
-import { runWhatIf, generateReport, restoreSession } from '../lib/api'
+import { runWhatIf, runWhatIfCompare, generateReport, restoreSession, WhatIfCompareResult } from '../lib/api'
 import LlmStatusBadge from '../components/LlmStatusBadge'
 
 export default function WhatIf() {
@@ -15,6 +15,15 @@ export default function WhatIf() {
   const [loading, setLoading] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Compare mode state
+  const [compareMode, setCompareMode] = useState(false)
+  const [colA, setColA] = useState<string>('')
+  const [pctA, setPctA] = useState<number>(10)
+  const [colB, setColB] = useState<string>('')
+  const [pctB, setPctB] = useState<number>(-10)
+  const [compareResult, setCompareResult] = useState<WhatIfCompareResult | null>(null)
+  const [compareLoading, setCompareLoading] = useState(false)
 
   useEffect(() => {
     if (!sessionId || !scoreData) {
@@ -40,6 +49,9 @@ export default function WhatIf() {
     if (numericCols.length > 0 && !selectedCol) {
       setSelectedCol(numericCols[0])
     }
+    // Initialize compare mode columns (pick first two distinct numeric cols)
+    if (numericCols.length > 0 && !colA) setColA(numericCols[0])
+    if (numericCols.length > 1 && !colB) setColB(numericCols[1])
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -63,6 +75,43 @@ export default function WhatIf() {
       store.setWhatIfResult(result)
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Simulation failed')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleCompare = async () => {
+    if (!sessionId || !colA || !colB || compareLoading) return
+    setCompareLoading(true)
+    setError(null)
+    setCompareResult(null)
+    try {
+      const result = await runWhatIfCompare(
+        sessionId,
+        { column: colA, pct_change: pctA },
+        { column: colB, pct_change: pctB }
+      )
+      setCompareResult(result)
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Comparison failed')
+    } finally {
+      setCompareLoading(false)
+    }
+  }
+
+  // Apply a compare scenario as the main what-if (so user can export PDF with it)
+  const applyCompareScenario = async (scenario: 'A' | 'B') => {
+    if (!sessionId) return
+    const col = scenario === 'A' ? colA : colB
+    const pct = scenario === 'A' ? pctA : pctB
+    setLoading(true)
+    setError(null)
+    try {
+      const result = await runWhatIf(sessionId, col, pct)
+      store.setWhatIfResult(result)
+      setCompareMode(false)  // flip back to single mode to show the result
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to apply scenario')
     } finally {
       setLoading(false)
     }
@@ -134,6 +183,43 @@ export default function WhatIf() {
           </p>
         </div>
 
+        {/* Mode toggle */}
+        <div style={{ display: 'flex', gap: 8, marginBottom: 20, justifyContent: 'center' }}>
+          <button
+            onClick={() => { setCompareMode(false); setCompareResult(null); setError(null) }}
+            style={{
+              padding: '8px 18px', borderRadius: 8, fontSize: 13, fontWeight: 600,
+              border: `2px solid ${!compareMode ? '#2563EB' : '#E2E8F0'}`,
+              background: !compareMode ? '#EFF6FF' : 'white',
+              color: !compareMode ? '#1D4ED8' : '#64748B',
+              cursor: 'pointer', transition: 'all 0.15s',
+            }}
+          >
+            🎛️ Single Scenario
+          </button>
+          <button
+            onClick={() => { setCompareMode(true); setCompareResult(null); setError(null) }}
+            style={{
+              padding: '8px 18px', borderRadius: 8, fontSize: 13, fontWeight: 600,
+              border: `2px solid ${compareMode ? '#7C3AED' : '#E2E8F0'}`,
+              background: compareMode ? '#F5F3FF' : 'white',
+              color: compareMode ? '#6D28D9' : '#64748B',
+              cursor: 'pointer', transition: 'all 0.15s',
+            }}
+          >
+            ⚖️ Compare Two Scenarios
+          </button>
+        </div>
+
+        {error && (
+          <div style={{ marginBottom: 20, padding: '12px 16px', background: '#FEE2E2', borderRadius: 8, fontSize: 13, color: '#DC2626' }}>
+            {error}
+          </div>
+        )}
+
+        {/* Single Scenario Mode */}
+        {!compareMode && (
+        <>
         {/* Simulator Controls */}
         <div className="card" style={{ marginBottom: 24 }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: '#64748B', marginBottom: 16 }}>CONFIGURE SCENARIO</div>
@@ -394,6 +480,208 @@ export default function WhatIf() {
               </p>
             </div>
           </div>
+        )}
+        </>
+        )}
+
+        {/* Compare Mode */}
+        {compareMode && (
+          <>
+            {/* Configure two scenarios */}
+            <div className="card" style={{ marginBottom: 24 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: '#64748B', marginBottom: 16 }}>
+                CONFIGURE TWO SCENARIOS TO COMPARE
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 20 }}>
+                {/* Scenario A */}
+                <div style={{ padding: 16, background: '#EFF6FF', borderRadius: 8, border: '1px solid #BFDBFE' }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: '#1D4ED8', marginBottom: 10 }}>
+                    SCENARIO A
+                  </div>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: '#1E293B', display: 'block', marginBottom: 6 }}>Column</label>
+                  <select
+                    value={colA}
+                    onChange={e => setColA(e.target.value)}
+                    style={{ width: '100%', padding: '8px 10px', border: '1px solid #E2E8F0', borderRadius: 6, fontSize: 12, marginBottom: 10 }}
+                  >
+                    {numericCols.map(col => <option key={col} value={col}>{col}</option>)}
+                  </select>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: '#1E293B', display: 'block', marginBottom: 6 }}>
+                    Change by: <span style={{ color: '#1D4ED8' }}>{pctA > 0 ? '+' : ''}{pctA}%</span>
+                  </label>
+                  <input type="range" min={-50} max={50} value={pctA} onChange={e => setPctA(Number(e.target.value))} style={{ width: '100%' }} />
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#94A3B8' }}>
+                    <span>−50%</span><span>0%</span><span>+50%</span>
+                  </div>
+                </div>
+
+                {/* Scenario B */}
+                <div style={{ padding: 16, background: '#F5F3FF', borderRadius: 8, border: '1px solid #DDD6FE' }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: '#6D28D9', marginBottom: 10 }}>
+                    SCENARIO B
+                  </div>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: '#1E293B', display: 'block', marginBottom: 6 }}>Column</label>
+                  <select
+                    value={colB}
+                    onChange={e => setColB(e.target.value)}
+                    style={{ width: '100%', padding: '8px 10px', border: '1px solid #E2E8F0', borderRadius: 6, fontSize: 12, marginBottom: 10 }}
+                  >
+                    {numericCols.map(col => <option key={col} value={col}>{col}</option>)}
+                  </select>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: '#1E293B', display: 'block', marginBottom: 6 }}>
+                    Change by: <span style={{ color: '#6D28D9' }}>{pctB > 0 ? '+' : ''}{pctB}%</span>
+                  </label>
+                  <input type="range" min={-50} max={50} value={pctB} onChange={e => setPctB(Number(e.target.value))} style={{ width: '100%' }} />
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#94A3B8' }}>
+                    <span>−50%</span><span>0%</span><span>+50%</span>
+                  </div>
+                </div>
+              </div>
+
+              <button
+                className="btn-primary"
+                style={{ width: '100%', justifyContent: 'center', padding: '12px 20px', fontSize: 15, background: '#7C3AED' }}
+                onClick={handleCompare}
+                disabled={compareLoading || !colA || !colB || (colA === colB && pctA === pctB)}
+              >
+                {compareLoading ? (
+                  <><div className="dot" style={{ background: 'white' }}></div>Comparing scenarios…</>
+                ) : (
+                  '⚖️ Compare Scenarios'
+                )}
+              </button>
+            </div>
+
+            {/* Comparison Results */}
+            {compareResult && (
+              <div className="animate-fade-in-up">
+                {/* Winner banner */}
+                <div style={{
+                  marginBottom: 20, padding: '16px 20px', borderRadius: 10,
+                  background: compareResult.winner === 'tie'
+                    ? 'linear-gradient(135deg, #64748B 0%, #475569 100%)'
+                    : compareResult.winner === 'A'
+                      ? 'linear-gradient(135deg, #1D4ED8 0%, #1E40AF 100%)'
+                      : 'linear-gradient(135deg, #7C3AED 0%, #6D28D9 100%)',
+                  color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12,
+                }}>
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: 700, opacity: 0.85, marginBottom: 4 }}>WINNER</div>
+                    <div style={{ fontSize: 20, fontWeight: 800 }}>
+                      {compareResult.winner === 'tie'
+                        ? "It's a tie — both scenarios produce the same score"
+                        : `Scenario ${compareResult.winner} wins by ${Math.abs(compareResult.delta_between.score).toFixed(1)} points`}
+                    </div>
+                  </div>
+                  {compareResult.winner !== 'tie' && (
+                    <button
+                      onClick={() => applyCompareScenario(compareResult.winner as 'A' | 'B')}
+                      style={{
+                        padding: '8px 16px', borderRadius: 8, background: 'white',
+                        color: compareResult.winner === 'A' ? '#1D4ED8' : '#6D28D9',
+                        fontSize: 12, fontWeight: 700, border: 'none', cursor: 'pointer',
+                      }}
+                    >
+                      Use Scenario {compareResult.winner} → Get Gemini analysis
+                    </button>
+                  )}
+                </div>
+
+                {/* Side-by-side score cards */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 20 }}>
+                  {(['A', 'B'] as const).map(label => {
+                    const sc = label === 'A' ? compareResult.scenario_a : compareResult.scenario_b
+                    const isWinner = compareResult.winner === label
+                    const accent = label === 'A' ? '#1D4ED8' : '#7C3AED'
+                    return (
+                      <div
+                        key={label}
+                        className="card"
+                        style={{
+                          borderTop: `3px solid ${accent}`,
+                          position: 'relative',
+                          boxShadow: isWinner ? `0 0 0 2px ${accent}40` : undefined,
+                        }}
+                      >
+                        {isWinner && (
+                          <span style={{
+                            position: 'absolute', top: 8, right: 8,
+                            padding: '2px 8px', borderRadius: 10,
+                            background: `${accent}20`, color: accent,
+                            fontSize: 10, fontWeight: 700,
+                          }}>
+                            ★ WINNER
+                          </span>
+                        )}
+                        <div style={{ fontSize: 11, fontWeight: 700, color: '#94A3B8', marginBottom: 12 }}>
+                          SCENARIO {label}
+                        </div>
+                        <div style={{ fontSize: 12, color: '#64748B', marginBottom: 8 }}>
+                          <strong style={{ color: '#1E293B' }}>{sc.column}</strong> {sc.pct_change > 0 ? '+' : ''}{sc.pct_change}%
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 8 }}>
+                          <span style={{ fontSize: 40, fontWeight: 800, fontFamily: 'Space Grotesk, sans-serif', color: accent }}>
+                            {sc.new_score.score.toFixed(1)}
+                          </span>
+                          <span style={{ fontSize: 13, color: '#94A3B8' }}>/ 100</span>
+                          <span style={{ fontSize: 13, fontWeight: 700, color: sc.new_score.score >= compareResult.baseline.score ? '#16A34A' : '#DC2626' }}>
+                            ({sc.new_score.score >= compareResult.baseline.score ? '+' : ''}{(sc.new_score.score - compareResult.baseline.score).toFixed(1)})
+                          </span>
+                        </div>
+                        <div style={{
+                          display: 'inline-flex', alignItems: 'center', padding: '4px 12px',
+                          borderRadius: 20, fontSize: 12, fontWeight: 700,
+                          background: sc.new_score.risk_level === 'Low' ? '#DCFCE7' : sc.new_score.risk_level === 'Medium' ? '#FEF3C7' : '#FEE2E2',
+                          color: riskColor(sc.new_score.risk_level),
+                        }}>
+                          {sc.new_score.risk_level} Risk
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+
+                {/* Sub-score delta table */}
+                <div className="card" style={{ marginBottom: 20 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: '#64748B', marginBottom: 14 }}>
+                    SUB-SCORE DELTA (B − A)
+                  </div>
+                  {[
+                    { label: 'Data Quality', key: 'data_quality' },
+                    { label: 'Trend Stability', key: 'trend_stability' },
+                    { label: 'Risk Inverse', key: 'risk_inverse' },
+                    { label: 'Opportunity', key: 'opportunity' },
+                  ].map(sub => {
+                    const delta = compareResult.delta_between.sub_scores[sub.key] || 0
+                    const aVal = compareResult.scenario_a.new_score.sub_scores[sub.key]
+                    const bVal = compareResult.scenario_b.new_score.sub_scores[sub.key]
+                    return (
+                      <div key={sub.key} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 0', borderBottom: '1px solid #F1F5F9' }}>
+                        <span style={{ fontSize: 13, color: '#475569', fontWeight: 500 }}>{sub.label}</span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                          <span style={{ fontSize: 12, color: '#1D4ED8', fontWeight: 600 }}>A: {aVal.toFixed(1)}</span>
+                          <span style={{ color: '#94A3B8' }}>vs</span>
+                          <span style={{ fontSize: 12, color: '#7C3AED', fontWeight: 600 }}>B: {bVal.toFixed(1)}</span>
+                          <span style={{
+                            fontSize: 12, fontWeight: 700, padding: '2px 8px', borderRadius: 10,
+                            background: delta > 0 ? '#DCFCE7' : delta < 0 ? '#FEE2E2' : '#F1F5F9',
+                            color: delta > 0 ? '#16A34A' : delta < 0 ? '#DC2626' : '#64748B',
+                            minWidth: 50, textAlign: 'center',
+                          }}>
+                            {delta > 0 ? '+' : ''}{delta.toFixed(1)}
+                          </span>
+                        </div>
+                      </div>
+                    )
+                  })}
+                  <div style={{ marginTop: 12, padding: '10px 12px', background: '#F8FAFC', borderRadius: 6, fontSize: 11, color: '#64748B' }}>
+                    💡 Positive delta = Scenario B is better on that sub-score. Negative = Scenario A is better.
+                    Click "Use Scenario X → Get Gemini analysis" to flip back to single mode with a narrative explanation.
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
         )}
       </div>
     </div>

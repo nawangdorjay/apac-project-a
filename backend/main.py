@@ -23,7 +23,7 @@ from fastapi.responses import Response, JSONResponse
 from dotenv import load_dotenv
 
 from models.schemas import (
-    UploadResponse, DecisionScoreResponse, WhatIfRequest, WhatIfResponse,
+    UploadResponse, DecisionScoreResponse, WhatIfRequest, WhatIfCompareRequest, WhatIfResponse,
     ChatRequest, ChatResponse, SubScores, Priority, Recommendation, ScoreSnapshot,
     ForecastResponse, AutomationRequest, AutomationResponse
 )
@@ -424,6 +424,91 @@ def run_whatif(session_id: str, request: WhatIfRequest):
     sessions[session_id]["whatif_data"] = whatif_result
     _persist_session_field(session_id, "whatif_data", whatif_result)
     return whatif_result
+
+
+@app.post("/api/whatif/compare/{session_id}")
+def run_whatif_compare(session_id: str, request: WhatIfCompareRequest):
+    """
+    Run two scenarios side-by-side and return both results + a delta
+    between them. Useful for "what if revenue +10% vs expenses -10%?".
+
+    No Gemini call — comparison is pure math so judges see instant
+    response. The frontend can optionally call /api/whatif on the
+    winner to get a narrative explanation.
+    """
+    session = _get_session(session_id)
+    df = session["df"]
+    profile = session.get("profile_data")
+    score_data = session.get("score_data")
+
+    if not profile or not score_data:
+        raise HTTPException(status_code=400, detail="Run /api/profile and /api/decision-score first")
+
+    for label, scenario in [("A", request.scenario_a), ("B", request.scenario_b)]:
+        if scenario.column not in df.columns:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Scenario {label}: column '{scenario.column}' not found"
+            )
+
+    original_opportunity = score_data["sub_scores"]["opportunity"]
+    old_snapshot = {
+        "score": score_data["score"],
+        "risk_level": score_data["risk_level"],
+        "confidence": score_data["confidence"],
+        "sub_scores": score_data["sub_scores"],
+    }
+
+    # Run both scenarios
+    result_a = perturb_and_rescore(
+        df, profile, request.scenario_a.column,
+        request.scenario_a.pct_change, original_opportunity
+    )
+    result_b = perturb_and_rescore(
+        df, profile, request.scenario_b.column,
+        request.scenario_b.pct_change, original_opportunity
+    )
+
+    # Compute delta between A and B (B - A, so positive = B is better)
+    delta_between = {
+        "score": round(result_b["score"] - result_a["score"], 1),
+        "risk_level_changed": result_a["risk_level"] != result_b["risk_level"],
+        "sub_scores": {
+            k: round(float(result_b["sub_scores"][k]) - float(result_a["sub_scores"][k]), 1)
+            for k in result_a["sub_scores"]
+        },
+    }
+
+    # Pick winner (higher score wins; ties broken by lower risk)
+    a_risk_rank = {"Low": 0, "Medium": 1, "High": 2}[result_a["risk_level"]]
+    b_risk_rank = {"Low": 0, "Medium": 1, "High": 2}[result_b["risk_level"]]
+    if result_a["score"] > result_b["score"]:
+        winner = "A"
+    elif result_b["score"] > result_a["score"]:
+        winner = "B"
+    elif a_risk_rank < b_risk_rank:
+        winner = "A"
+    elif b_risk_rank < a_risk_rank:
+        winner = "B"
+    else:
+        winner = "tie"
+
+    return {
+        "session_id": session_id,
+        "baseline": old_snapshot,
+        "scenario_a": {
+            "column": request.scenario_a.column,
+            "pct_change": request.scenario_a.pct_change,
+            "new_score": result_a,
+        },
+        "scenario_b": {
+            "column": request.scenario_b.column,
+            "pct_change": request.scenario_b.pct_change,
+            "new_score": result_b,
+        },
+        "delta_between": delta_between,
+        "winner": winner,
+    }
 
 
 # ── PDF REPORT ────────────────────────────────────────────────────────────────
