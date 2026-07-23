@@ -135,6 +135,7 @@ export default function Results() {
   const navigate = useNavigate()
   const store = usePipelineStore()
   const [showBreakdown, setShowBreakdown] = useState(false)
+  const [showMathModal, setShowMathModal] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [chatOpen, setChatOpen] = useState(false)
   const [chatInput, setChatInput] = useState('')
@@ -390,6 +391,17 @@ export default function Results() {
                   </div>
                 ))}
               </div>
+            )}
+
+            {/* Show Full Math button — opens modal with per-component breakdown */}
+            {scoreData.sub_score_explanations && (
+              <button
+                className="btn-ghost"
+                style={{ marginTop: 12, width: '100%', justifyContent: 'center', color: '#7C3AED', fontSize: 11, fontWeight: 600 }}
+                onClick={() => setShowMathModal(true)}
+              >
+                🧮 Show Full Math (per-component breakdown)
+              </button>
             )}
           </div>
 
@@ -675,6 +687,122 @@ export default function Results() {
                 borderRadius: 8, fontSize: 13, outline: 'none', color: '#1E293B'
               }}
             />
+          </div>
+        </div>
+      )}
+
+      {/* Score Breakdown Math Modal */}
+      {showMathModal && scoreData.sub_score_explanations && (
+        <div
+          style={{
+            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+            background: 'rgba(15, 23, 42, 0.6)', backdropFilter: 'blur(4px)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+            padding: 20,
+          }}
+          className="animate-fade-in-up"
+          onClick={() => setShowMathModal(false)}
+        >
+          <div
+            className="card"
+            style={{ maxWidth: 720, width: '100%', maxHeight: '85vh', overflowY: 'auto', boxShadow: '0 25px 50px -12px rgba(0,0,0,0.25)' }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <div>
+                <div style={{ fontSize: 16, fontWeight: 700, color: '#1E293B' }}>🧮 Score Breakdown Math</div>
+                <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 2 }}>
+                  Every number is computed deterministically from your dataset stats. No black boxes.
+                </div>
+              </div>
+              <button className="btn-ghost" style={{ padding: '4px 8px' }} onClick={() => setShowMathModal(false)}>✕</button>
+            </div>
+
+            {/* Final formula */}
+            {scoreData.score_formula && (
+              <div style={{ background: '#F5F3FF', borderRadius: 8, padding: 14, marginBottom: 16, border: '1px solid #DDD6FE' }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: '#6D28D9', letterSpacing: '0.05em', marginBottom: 6 }}>
+                  DECISION SCORE FORMULA
+                </div>
+                <div style={{ fontSize: 13, fontFamily: 'monospace', color: '#1E293B', marginBottom: 8 }}>
+                  {scoreData.score_formula.formula}
+                </div>
+                <div style={{ fontSize: 12, fontFamily: 'monospace', color: '#7C3AED', fontWeight: 600 }}>
+                  = {scoreData.score_formula.computation}
+                </div>
+                <div style={{ fontSize: 18, fontWeight: 800, color: '#1E293B', marginTop: 8, fontFamily: 'Space Grotesk, sans-serif' }}>
+                  → Score: {scoreData.score.toFixed(1)} <span style={{ fontSize: 12, color: '#94A3B8', fontWeight: 500 }}>/ 100</span>
+                </div>
+              </div>
+            )}
+
+            {/* Per-sub-score breakdown */}
+            {Object.entries(scoreData.sub_score_explanations).map(([key, exp]) => {
+              const labelMap: Record<string, string> = {
+                data_quality: '📊 Data Quality',
+                trend_stability: '📈 Trend Stability',
+                risk_inverse: '🛡️ Risk Inverse',
+                opportunity: '✨ Opportunity (AI)',
+                confidence: '🎯 Confidence (separate metric)',
+              }
+              const isConfidence = key === 'confidence'
+              return (
+                <div key={key} style={{ marginBottom: 16, padding: 12, background: '#F8FAFC', borderRadius: 8, border: '1px solid #E2E8F0' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: '#1E293B' }}>
+                      {labelMap[key] || key}
+                    </span>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
+                      <span style={{ fontSize: 18, fontWeight: 800, color: isConfidence ? '#0891B2' : '#1E293B', fontFamily: 'Space Grotesk, sans-serif' }}>
+                        {exp.score.toFixed(1)}
+                      </span>
+                      {!isConfidence && exp.weight !== null && (
+                        <span style={{ fontSize: 11, color: '#94A3B8' }}>
+                          × {exp.weight} weight = <strong style={{ color: '#7C3AED' }}>{exp.contribution?.toFixed(1)}</strong> contribution
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 11, fontFamily: 'monospace', color: '#64748B', marginBottom: 10, padding: '6px 8px', background: 'white', borderRadius: 4, border: '1px solid #E2E8F0' }}>
+                    {exp.formula}
+                  </div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: '#94A3B8', marginBottom: 6, letterSpacing: '0.03em' }}>
+                    COMPONENTS
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 6 }}>
+                    {Object.entries(exp.components).map(([compKey, comp]) => (
+                      <div key={compKey} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', padding: '6px 8px', background: 'white', borderRadius: 4, border: '1px solid #F1F5F9' }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: '#1E293B' }}>
+                            {comp.label}
+                            {comp.weight !== null && (
+                              <span style={{ marginLeft: 6, fontSize: 10, color: '#94A3B8', fontWeight: 500 }}>
+                                (weight: {comp.weight})
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ fontSize: 10, fontFamily: 'monospace', color: '#64748B', marginTop: 2 }}>
+                            {comp.raw}
+                          </div>
+                        </div>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: '#2563EB', fontFamily: 'monospace', marginLeft: 12 }}>
+                          {comp.value !== null ? comp.value.toFixed(4) : '—'}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            })}
+
+            <div style={{ marginTop: 16, padding: 12, background: '#ECFDF5', borderRadius: 8, border: '1px solid #A7F3D0', fontSize: 11, color: '#047857' }}>
+              ✅ Every number above is computed from your actual dataset statistics (row counts, null percentages, std/mean ratios, outlier counts).
+              The only AI-derived value is the Opportunity sub-score, which is capped at 15% weight to prevent AI bias from dominating the Decision Score.
+            </div>
+
+            <button className="btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: 16 }} onClick={() => setShowMathModal(false)}>
+              Close
+            </button>
           </div>
         </div>
       )}

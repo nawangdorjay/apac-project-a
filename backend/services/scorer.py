@@ -9,13 +9,22 @@ def compute_decision_score(
 ) -> Dict[str, Any]:
     """
     Compute the Decision Score using the exact weighted formula from the PRD.
-    
+
     Decision Score = (0.35 × Data Quality Score)
                    + (0.25 × Trend Stability Score)
                    + (0.25 × Risk Inverse Score)
                    + (0.15 × Opportunity Score)
-    
+
     All sub-scores except Opportunity are 100% deterministic.
+
+    Confidence is a SEPARATE metric (not the score) that quantifies how
+    much we should trust the score. It uses three DIVERSIFIED signals:
+      - Sample size sufficiency (40%): more rows = more trust
+      - Completeness (40%): fewer nulls = more trust
+      - Column coverage (20%): more numeric columns × rows-per-column
+        = more statistical power. This is INTENTIONALLY different from
+        trend_stability (which uses coefficient of variation) so the
+        two metrics don't move in lockstep.
     """
     numeric_cols = profile.get("numeric_cols", [])
     columns = profile.get("columns", [])
@@ -23,46 +32,48 @@ def compute_decision_score(
 
     # --- 1. Data Quality Score (0-100) ---
     # Completeness (% non-null), type conformity, outlier ratio
-    completeness = (1 - _get_avg_null_pct(columns) / 100)
-    
+    avg_null_pct = _get_avg_null_pct(columns)
+    completeness = (1 - avg_null_pct / 100)
+
     total_outliers = sum(c.get("outlier_count", 0) for c in columns)
     total_numeric_vals = sum(
         df[col].count() for col in numeric_cols if col in df.columns
     ) if numeric_cols else 1
     outlier_ratio = total_outliers / max(total_numeric_vals, 1)
-    
+
     # Type conformity: fraction of cols that have consistent types (no mixed)
     type_conformity = _compute_type_conformity(df, columns)
-    
+
+    # Outlier component (low outlier ratio = high score)
+    outlier_component = 1 - min(outlier_ratio * 3, 1)
+
     data_quality_score = (
         completeness * 50 +           # 50% weight on completeness
         type_conformity * 30 +        # 30% weight on type conformity
-        (1 - min(outlier_ratio * 3, 1)) * 20  # 20% weight on low outlier ratio
+        outlier_component * 20        # 20% weight on low outlier ratio
     )
     data_quality_score = max(0.0, min(100.0, data_quality_score))
 
     # --- 2. Trend Stability Score (0-100) ---
     # Lower coefficient of variation across numeric cols = higher stability
+    cvs = []
     if numeric_cols:
-        cvs = []
         for col in numeric_cols:
             if col in df.columns:
                 col_data = df[col].dropna()
                 if len(col_data) > 1 and col_data.mean() != 0:
                     cv = col_data.std() / abs(col_data.mean())
                     cvs.append(min(cv, 2.0))  # cap CV at 2.0
-        if cvs:
-            avg_cv = np.mean(cvs)
-            trend_stability_score = max(0.0, (1 - avg_cv / 2.0) * 100)
-        else:
-            trend_stability_score = 50.0
+    if cvs:
+        avg_cv = np.mean(cvs)
+        trend_stability_score = max(0.0, (1 - avg_cv / 2.0) * 100)
     else:
         trend_stability_score = 50.0
 
     # --- 3. Risk Inverse Score (0-100) ---
     # More anomalies = lower score
     # Based on: outlier density + null density
-    null_density = _get_avg_null_pct(columns) / 100
+    null_density = avg_null_pct / 100
     anomaly_density = min((outlier_ratio + null_density) / 2, 1.0)
     risk_inverse_score = max(0.0, (1 - anomaly_density) * 100)
 
@@ -87,17 +98,137 @@ def compute_decision_score(
     else:
         risk_level = "High"
 
-    # --- AI Confidence (from data sufficiency, never from model self-report) ---
-    # Based on: row count (more = better), completeness, variance
-    row_score = min(row_count / 100, 1.0)  # 100+ rows = full confidence on this factor
-    completeness_score = completeness
-    variance_score = 1.0 - min(np.mean([
-        df[col].std() / (abs(df[col].mean()) + 1e-9)
-        for col in numeric_cols if col in df.columns
-    ]) / 2.0, 1.0) if numeric_cols else 0.5
+    # --- AI Confidence (DIVERSIFIED — no longer redundant with trend_stability) ---
+    # Three signals, each measuring a DIFFERENT dimension of trust:
+    #   1. Sample size sufficiency (40%): sqrt-saturating curve so 100+ rows = full
+    #   2. Completeness (40%): same metric as data_quality, but weighted differently
+    #   3. Column coverage (20%): statistical power = numeric_cols × rows_per_col
+    #      This is NOT CV-based, so confidence and trend_stability can move independently.
+    row_score = min(np.sqrt(row_count / 100), 1.0) if row_count > 0 else 0.0
+    completeness_score = completeness  # 0-1
+    # Effective sample size: numeric_cols × rows, normalized to a target of 200
+    # (e.g. 10 cols × 20 rows = 200 → full coverage; 2 cols × 5 rows = 10 → low)
+    eff_n = len(numeric_cols) * row_count
+    coverage_score = min(eff_n / 200.0, 1.0) if eff_n > 0 else 0.0
 
-    confidence = round((row_score * 0.4 + completeness_score * 0.4 + variance_score * 0.2) * 100, 1)
+    confidence = round((row_score * 0.4 + completeness_score * 0.4 + coverage_score * 0.2) * 100, 1)
     confidence = max(10.0, min(98.0, confidence))
+
+    # --- Per-sub-score explanation breakdown (for the Score Breakdown Math modal) ---
+    sub_score_explanations = {
+        "data_quality": {
+            "score": round(data_quality_score, 1),
+            "weight": 0.35,
+            "contribution": round(0.35 * data_quality_score, 1),
+            "formula": "0.50 × Completeness + 0.30 × TypeConformity + 0.20 × (1 − OutlierRatio×3)",
+            "components": {
+                "completeness": {
+                    "value": round(completeness, 4),
+                    "raw": f"1 − ({avg_null_pct:.2f}% / 100) = {completeness:.4f}",
+                    "weight": 0.50,
+                    "label": "Completeness (non-null %)",
+                },
+                "type_conformity": {
+                    "value": round(type_conformity, 4),
+                    "raw": f"{int(type_conformity * len(columns))} / {len(columns)} columns consistently typed",
+                    "weight": 0.30,
+                    "label": "Type Conformity",
+                },
+                "outlier_component": {
+                    "value": round(outlier_component, 4),
+                    "raw": f"1 − min({outlier_ratio:.4f} × 3, 1) = {outlier_component:.4f}  ({total_outliers} outliers / {total_numeric_vals} numeric values)",
+                    "weight": 0.20,
+                    "label": "Outlier Inverse",
+                },
+            },
+        },
+        "trend_stability": {
+            "score": round(trend_stability_score, 1),
+            "weight": 0.25,
+            "contribution": round(0.25 * trend_stability_score, 1),
+            "formula": "(1 − avgCV / 2.0) × 100   where avgCV = mean(std / |mean|) per numeric column",
+            "components": {
+                "avg_cv": {
+                    "value": round(float(np.mean(cvs)), 4) if cvs else None,
+                    "raw": f"mean of CVs across {len(cvs)} numeric cols = {float(np.mean(cvs)):.4f}" if cvs else "no numeric cols with non-zero mean",
+                    "weight": None,
+                    "label": "Average Coefficient of Variation",
+                },
+                "capped_cvs": {
+                    "value": len(cvs),
+                    "raw": f"{len(cvs)} cols (CV capped at 2.0)",
+                    "weight": None,
+                    "label": "Cols included",
+                },
+            },
+        },
+        "risk_inverse": {
+            "score": round(risk_inverse_score, 1),
+            "weight": 0.25,
+            "contribution": round(0.25 * risk_inverse_score, 1),
+            "formula": "(1 − anomaly_density) × 100   where anomaly_density = (outlier_ratio + null_density) / 2",
+            "components": {
+                "outlier_ratio": {
+                    "value": round(outlier_ratio, 4),
+                    "raw": f"{total_outliers} outliers / {total_numeric_vals} numeric values = {outlier_ratio:.4f}",
+                    "weight": 0.5,
+                    "label": "Outlier Ratio",
+                },
+                "null_density": {
+                    "value": round(null_density, 4),
+                    "raw": f"avg nulls_pct / 100 = {null_density:.4f}",
+                    "weight": 0.5,
+                    "label": "Null Density",
+                },
+                "anomaly_density": {
+                    "value": round(anomaly_density, 4),
+                    "raw": f"({outlier_ratio:.4f} + {null_density:.4f}) / 2 = {anomaly_density:.4f}",
+                    "weight": None,
+                    "label": "Anomaly Density (combined)",
+                },
+            },
+        },
+        "opportunity": {
+            "score": round(opportunity_score, 1),
+            "weight": 0.15,
+            "contribution": round(0.15 * opportunity_score, 1),
+            "formula": "Gemini-derived 0–100 score (capped weight to prevent AI bias)",
+            "components": {
+                "source": {
+                    "value": opportunity_score,
+                    "raw": "Google Gemini 2.0 Flash evaluates dataset profile (rows, columns, quality, numeric stats) and returns 0–100",
+                    "weight": None,
+                    "label": "AI-derived (Gemini 2.0 Flash)",
+                },
+            },
+        },
+        "confidence": {
+            "score": round(confidence, 1),
+            "weight": None,  # confidence is separate from the score
+            "contribution": None,
+            "formula": "0.40 × SampleSize + 0.40 × Completeness + 0.20 × ColumnCoverage   (NOT used in Decision Score — separate trust metric)",
+            "components": {
+                "sample_size": {
+                    "value": round(float(row_score), 4),
+                    "raw": f"sqrt({row_count} / 100) = {row_score:.4f}",
+                    "weight": 0.40,
+                    "label": "Sample Size (sqrt-saturating)",
+                },
+                "completeness": {
+                    "value": round(float(completeness_score), 4),
+                    "raw": f"1 − ({avg_null_pct:.2f}% / 100) = {completeness_score:.4f}",
+                    "weight": 0.40,
+                    "label": "Completeness",
+                },
+                "column_coverage": {
+                    "value": round(float(coverage_score), 4),
+                    "raw": f"({len(numeric_cols)} cols × {row_count} rows) / 200 = {coverage_score:.4f}",
+                    "weight": 0.20,
+                    "label": "Column Coverage (statistical power)",
+                },
+            },
+        },
+    }
 
     return {
         "score": decision_score,
@@ -108,6 +239,12 @@ def compute_decision_score(
             "trend_stability": round(trend_stability_score, 1),
             "risk_inverse": round(risk_inverse_score, 1),
             "opportunity": round(opportunity_score, 1)
+        },
+        "sub_score_explanations": sub_score_explanations,
+        "score_formula": {
+            "formula": "0.35 × DataQuality + 0.25 × TrendStability + 0.25 × RiskInverse + 0.15 × Opportunity",
+            "weights": {"data_quality": 0.35, "trend_stability": 0.25, "risk_inverse": 0.25, "opportunity": 0.15},
+            "computation": f"0.35 × {data_quality_score:.1f} + 0.25 × {trend_stability_score:.1f} + 0.25 × {risk_inverse_score:.1f} + 0.15 × {opportunity_score:.1f} = {decision_score:.1f}",
         }
     }
 

@@ -63,6 +63,23 @@ export interface ScoreData {
   top_priorities: Priority[]
   recommendations: Recommendation[]
   time_to_insight_ms: number
+  sub_score_explanations?: Record<string, {
+    score: number
+    weight: number | null
+    contribution: number | null
+    formula: string
+    components: Record<string, {
+      value: number | null
+      raw: string
+      weight: number | null
+      label: string
+    }>
+  }>
+  score_formula?: {
+    formula: string
+    weights: Record<string, number>
+    computation: string
+  }
 }
 
 export interface WhatIfResult {
