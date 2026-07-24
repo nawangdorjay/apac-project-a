@@ -142,19 +142,31 @@ Open **[http://localhost:5173](http://localhost:5173)** in your browser!
 
 ## 🛡️ Cold-Start Mitigation (Render Free Tier)
 
-Render's free tier sleeps containers after ~15 min of inactivity. The first request after sleep takes 30–60s while uvicorn boots. We mitigate this with **three layers**:
+Render's free tier sleeps containers after ~15 min of inactivity. The first request after sleep takes 30–60s while uvicorn boots. We mitigate this with **four layers** (the fifth — Vercel Cron — is optional and requires a Pro plan):
 
 | Layer | What it does | Where |
 |-------|--------------|-------|
-| **1. Vercel Cron** | Every 5 min, a Vercel Serverless Function pings `/api/warmup` to keep the container awake. | `frontend/api/warmup-cron.ts` + `frontend/vercel.json` `crons` |
-| **2. Frontend warmup** | On Landing page mount, the client fires a background `GET /api/warmup` so the backend is booted before the user clicks anything. | `frontend/src/lib/api.ts` `warmupBackend()` + `Landing.tsx` |
-| **3. Cold-start aware client** | All API calls go through `coldStartRequest()` which uses a 90s timeout on first call, retries once on network/timeout error, and surfaces state via `BackendWarmth` listeners. | `frontend/src/lib/api.ts` |
-| **4. ColdStartLoader banner** | When warmth is `warming` or `cold`, a dismissible banner appears at the top: "Waking up the backend — first request after inactivity takes ~30–60s on Render free tier". | `frontend/src/components/ColdStartLoader.tsx` |
-| **5. LLM badge cold-start state** | The `LlmStatusBadge` turns amber and pulses when the backend is cold-starting, so judges see we're aware of it. | `frontend/src/components/LlmStatusBadge.tsx` |
+| **1. Frontend warmup** | On Landing page mount, the client fires a background `GET /api/warmup` so the backend is booted before the user clicks anything. | `frontend/src/lib/api.ts` `warmupBackend()` + `Landing.tsx` |
+| **2. Cold-start aware client** | All API calls go through `coldStartRequest()` which uses a 90s timeout on first call, retries once on network/timeout error, and surfaces state via `BackendWarmth` listeners. | `frontend/src/lib/api.ts` |
+| **3. ColdStartLoader banner** | When warmth is `warming` or `cold`, a dismissible banner appears at the top: "Waking up the backend — first request after inactivity takes ~30–60s on Render free tier". | `frontend/src/components/ColdStartLoader.tsx` |
+| **4. LLM badge cold-start state** | The `LlmStatusBadge` turns amber and pulses when the backend is cold-starting, so judges see we're aware of it. | `frontend/src/components/LlmStatusBadge.tsx` |
+| **5. UptimeRobot (optional)** | External keep-alive pinging `/api/warmup` every 5 min. Works with any plan. See below. | External service |
 
-### Alternative: UptimeRobot
+### Optional: Vercel Cron (requires Pro plan)
 
-If Vercel Cron isn't enough (e.g. Vercel itself has cron reliability issues), set up a free [UptimeRobot](https://uptimerobot.com) monitor:
+If you're on Vercel Pro, you can add a serverless function that pings the backend every 5 min to keep it warm between judge visits. Add this to `frontend/vercel.json`:
+
+```json
+"crons": [
+  { "path": "/api/warmup-cron", "schedule": "*/5 * * * *" }
+]
+```
+
+And create `frontend/api/warmup-cron.ts` that fetches `${BACKEND_URL}/api/warmup`. **Note:** Vercel Hobby plan only allows daily cron frequency — you need Pro for `*/5 * * * *`.
+
+### Alternative: UptimeRobot (free, works on any plan)
+
+Set up a free [UptimeRobot](https://uptimerobot.com) monitor:
 
 1. Create a free account
 2. Add a new monitor → **HTTP(s)** type
